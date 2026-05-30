@@ -131,10 +131,11 @@ export async function createGoogleCalendarEvent(
   // Format start and end properly
   let startObj = {};
   let endObj = {};
+  const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Seoul';
 
   if (event.start.includes('T')) {
-    startObj = { dateTime: event.start };
-    endObj = { dateTime: event.end };
+    startObj = { dateTime: event.start, timeZone: localTimeZone };
+    endObj = { dateTime: event.end, timeZone: localTimeZone };
   } else {
     // All day
     startObj = { date: event.start.substring(0, 10) };
@@ -198,9 +199,11 @@ export async function updateGoogleCalendarEvent(
   // Check structure of start/end dates
   let startObj = {};
   let endObj = {};
+  const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Seoul';
+
   if (event.start.includes('T')) {
-    startObj = { dateTime: event.start };
-    endObj = { dateTime: event.end };
+    startObj = { dateTime: event.start, timeZone: localTimeZone };
+    endObj = { dateTime: event.end, timeZone: localTimeZone };
   } else {
     startObj = { date: event.start.substring(0, 10) };
     endObj = { date: event.end.substring(0, 10) };

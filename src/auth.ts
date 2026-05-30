@@ -68,9 +68,12 @@ export const initAuth = (
     if (firebaseUser) {
       // In Firebase Auth, the popup result is where we get the accessToken.
       // If the page is reloaded, the standard onAuthStateChanged does not supply the provider access token automatically.
-      // Thus, we retrieve any previously in-memory cached token.
-      // However, to make this UX seamless, if we don't have a cachedAccessToken but we have a firebaseUser, we can fallback to either asking for signin OR reusing an OAuth session token if stored securely or if we can silent-signin, or usingfirebaseUser's credentials.
-      // To satisfy all requirements, we will maintain standard cachedAccessToken, and if there is no cachedAccessToken, we also provide a way to re-auth or store it in-memory.
+      // Thus, we retrieve any previously stored cached token.
+      const savedToken = localStorage.getItem('cogwheel_gcal_access_token');
+      if (savedToken) {
+        cachedAccessToken = savedToken;
+      }
+
       callback(
         {
           uid: firebaseUser.uid,
@@ -100,6 +103,8 @@ export const googleSignIn = async (): Promise<{ user: AppUser; accessToken: stri
     }
 
     cachedAccessToken = credential.accessToken;
+    localStorage.setItem('cogwheel_gcal_access_token', credential.accessToken);
+
     const appUser: AppUser = {
       uid: result.user.uid,
       email: result.user.email,
@@ -144,6 +149,7 @@ export const logoutUser = async () => {
   bypassUser = null;
   cachedAccessToken = null;
   localStorage.removeItem('cogwheel_bypass_user');
+  localStorage.removeItem('cogwheel_gcal_access_token');
   try {
     await signOut(auth);
   } catch (e) {

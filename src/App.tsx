@@ -352,6 +352,7 @@ export default function App() {
     const localEventId = `monthly-evt-${Date.now()}`;
     
     let gcalId: string | undefined = undefined;
+    let syncErrorDectected = false;
 
     // Use selected date string or fallback to baseline if not provided
     let targetDateStr = dateStr;
@@ -372,6 +373,8 @@ export default function App() {
       });
       if (id) {
         gcalId = id;
+      } else {
+        syncErrorDectected = true;
       }
     }
 
@@ -403,7 +406,12 @@ export default function App() {
 
     setMonthlyEvents((prev) => [...prev, projectedEvent]);
     setWeeklyTasks((prev) => [...prev, newTask]);
-    showToast("📋 주간 업무 계획표와 월간 연동 보드에 일정이 함께 배치되었습니다.");
+
+    if (syncErrorDectected) {
+      showToast("⚠️ 일정은 로컬에 추가되었으나, 구글 캘린더 등록에 실패했습니다. (API 비활성화 또는 토큰 만료)");
+    } else {
+      showToast("📋 주간 업무 계획표와 월간 연동 보드에 일정이 함께 배치되었습니다.");
+    }
   };
 
   const handleToggleWeeklyTask = async (id: string) => {
@@ -536,6 +544,7 @@ export default function App() {
     const taskId = `copy-task-${Date.now()}`;
     const localEventId = `monthly-evt-${Date.now()}`;
     let gcalId: string | undefined = undefined;
+    let syncErrorDectected = false;
 
     let targetDate = targetDateStr || original.date;
     if (!targetDate) {
@@ -554,6 +563,8 @@ export default function App() {
       });
       if (idGcal) {
         gcalId = idGcal;
+      } else {
+        syncErrorDectected = true;
       }
     }
 
@@ -584,8 +595,12 @@ export default function App() {
 
     setMonthlyEvents(prev => [...prev, projectedEvent]);
     setWeeklyTasks((prev) => [...prev, newTask]);
-    const koreanDays = ['일요일', '월요일', '화요일', '수요일', '목요일', '금요일', '토요일'];
-    showToast(`📋 일정이 복사되어 주간 및 월간 보드에 함께 배치되었습니다.`);
+
+    if (syncErrorDectected) {
+      showToast(`⚠️ 복사된 일정은 성공적으로 배치되었으나, 구글 캘린더 등록에 실패했습니다. (API 확인 필요)`);
+    } else {
+      showToast(`📋 일정이 복사되어 주간 및 월간 보드에 함께 배치되었습니다.`);
+    }
   };
 
   // Monthly board event creation
@@ -645,7 +660,12 @@ export default function App() {
 
     setMonthlyEvents((prev) => [...prev, newEvent]);
     setWeeklyTasks((prev) => [...prev, newWeeklyTask]);
-    showToast("📆 월간 연동 보드와 주간 계획표에 신규 일정이 승인 배치되었습니다.");
+
+    if (user && !gcalId) {
+      showToast("⚠️ 보드에는 임시 추가되었으나, 구글 캘린더 등록에 실패했습니다. (API 활성화 상태 및 권한 확인 필요)");
+    } else {
+      showToast("📆 월간 연동 보드와 주간 계획표에 신규 일정이 승인 배치되었습니다.");
+    }
   };
 
   // Schedule detailed modifier
