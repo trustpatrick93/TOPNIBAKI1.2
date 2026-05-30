@@ -22,7 +22,8 @@ import {
 } from 'lucide-react';
 
 import { DiaryEntry, WeeklyTask, MonthlyEvent, Category, EventStatus } from './types';
-import { googleSignIn, logoutUser, initAuth, AppUser } from './auth';
+import { googleSignIn, logoutUser, initAuth, AppUser, db } from './auth';
+import { collection, getDocs, setDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { fetchGoogleCalendarEvents, createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from './calendarService';
 
 import ErrorGuideCard from './components/ErrorGuideCard';
@@ -79,6 +80,13 @@ export default function App() {
 
   // Track state change to save
   const dataLoadedRef = useRef<string | null>(null);
+  const isDbLoadedRef = useRef<boolean>(false);
+  const lastSyncStateRef = useRef<{
+    diary: DiaryEntry[];
+    tasks: WeeklyTask[];
+    events: MonthlyEvent[];
+    categories: Category[];
+  }>({ diary: [], tasks: [], events: [], categories: [] });
 
   // Initialize Clock & Authenticator connection
   useEffect(() => {
@@ -101,58 +109,11 @@ export default function App() {
     };
   }, []);
 
-  // Sync / Load logic when switching user (Authentication Isolation)
+  // Sync / Load logic when switching user (Authentication Isolation & Firestore Sync)
   useEffect(() => {
     if (authLoading) return;
 
-    if (user) {
-      // isolated multi-user loading from localstorage
-      const keyPrefix = `user_${user.uid}_cogwheel`;
-      
-      const loadedDiary = localStorage.getItem(`${keyPrefix}_diary_entries`);
-      const loadedTasks = localStorage.getItem(`${keyPrefix}_weekly_tasks`);
-      const loadedEvents = localStorage.getItem(`${keyPrefix}_monthly_events`);
-      const loadedCategories = localStorage.getItem(`${keyPrefix}_categories`);
-
-      let parsedDiary: DiaryEntry[] = loadedDiary ? JSON.parse(loadedDiary) : [];
-      let parsedCategories: Category[] = loadedCategories ? JSON.parse(loadedCategories) : DEFAULT_CATEGORIES;
-
-      // Ensure '🩺 일상' or '📝 일기' are seamlessly migrated to '⚙️ 일상'
-      parsedCategories = parsedCategories.map(cat => {
-        if (cat.name === '🩺 일상' || cat.name === '📝 일기') {
-          return { ...cat, name: '⚙️ 일상' };
-        }
-        return cat;
-      });
-
-      parsedDiary = parsedDiary.map(entry => {
-        if (entry.category === '🩺 일상' || entry.category === '📝 일기') {
-          return { ...entry, category: '⚙️ 일상' };
-        }
-        return entry;
-      });
-
-      // Ensure '⚙️ 일상' is at the very beginning of categories (if it exists)
-      const dailyIndex = parsedCategories.findIndex(c => c.name === '⚙️ 일상');
-      if (dailyIndex > 0) {
-        const [dailyCat] = parsedCategories.splice(dailyIndex, 1);
-        parsedCategories.unshift(dailyCat);
-      }
-
-      setDiaryEntries(parsedDiary);
-      setWeeklyTasks(loadedTasks ? JSON.parse(loadedTasks) : INITIAL_LOCAL_TASKS);
-      setMonthlyEvents(loadedEvents ? JSON.parse(loadedEvents) : INITIAL_MONTHLY_EVENTS);
-      setCategories(parsedCategories);
-      setSyncError(null);
-
-      dataLoadedRef.current = user.uid;
-      
-      // Auto-trigger synchronizer on login
-      setTimeout(() => {
-        triggerSync(currentTokenRef.current || 'simulated_developer_bypass_token', user.uid);
-      }, 500);
-
-    } else {
+    if (!user) {
       // Clear data to prevent leaks
       setDiaryEntries([]);
       setWeeklyTasks([]);
@@ -160,7 +121,155 @@ export default function App() {
       setCategories(DEFAULT_CATEGORIES);
       setSyncError(null);
       dataLoadedRef.current = null;
+      isDbLoadedRef.current = false;
+      return;
     }
+
+    // Isolated multi-user loading from localstorage first for instant start
+    const keyPrefix = `user_${user.uid}_cogwheel`;
+    const loadedDiary = localStorage.getItem(`${keyPrefix}_diary_entries`);
+    const loadedTasks = localStorage.getItem(`${keyPrefix}_weekly_tasks`);
+    const loadedEvents = localStorage.getItem(`${keyPrefix}_monthly_events`);
+    const loadedCategories = localStorage.getItem(`${keyPrefix}_categories`);
+
+    let parsedDiary: DiaryEntry[] = loadedDiary ? JSON.parse(loadedDiary) : [];
+    let parsedTasks: WeeklyTask[] = loadedTasks ? JSON.parse(loadedTasks) : INITIAL_LOCAL_TASKS;
+    let parsedEvents: MonthlyEvent[] = loadedEvents ? JSON.parse(loadedEvents) : INITIAL_MONTHLY_EVENTS;
+    let parsedCategories: Category[] = loadedCategories ? JSON.parse(loadedCategories) : DEFAULT_CATEGORIES;
+
+    // Ensure '🩺 일상' or '📝 일기' are seamlessly migrated to '⚙️ 일상'
+    parsedCategories = parsedCategories.map(cat => {
+      if (cat.name === '🩺 일상' || cat.name === '📝 일기') {
+        return { ...cat, name: '⚙️ 일상' };
+      }
+      return cat;
+    });
+
+    parsedDiary = parsedDiary.map(entry => {
+      if (entry.category === '🩺 일상' || entry.category === '📝 일기') {
+        return { ...entry, category: '⚙️ 일상' };
+      }
+      return entry;
+    });
+
+    // Ensure '⚙️ 일상' is at the very beginning of categories (if it exists)
+    const dailyIndex = parsedCategories.findIndex(c => c.name === '⚙️ 일상');
+    if (dailyIndex > 0) {
+      const [dailyCat] = parsedCategories.splice(dailyIndex, 1);
+      parsedCategories.unshift(dailyCat);
+    }
+
+    setDiaryEntries(parsedDiary);
+    setWeeklyTasks(parsedTasks);
+    setMonthlyEvents(parsedEvents);
+    setCategories(parsedCategories);
+    setSyncError(null);
+
+    // Bootstrap lastSyncStateRef.current with temporary local values
+    lastSyncStateRef.current = {
+      diary: parsedDiary,
+      tasks: parsedTasks,
+      events: parsedEvents,
+      categories: parsedCategories
+    };
+
+    // Load actual cloud data securely from Firebase Firestore
+    const syncFromFirestore = async () => {
+      try {
+        console.log("[FIRESTORE] Fetching cloud data for user: ", user.uid);
+        
+        // 1. Fetch Diary
+        const diarySnap = await getDocs(collection(db, "users", user.uid, "diary_entries"));
+        const fbDiary: DiaryEntry[] = [];
+        diarySnap.forEach(dDoc => {
+          fbDiary.push(dDoc.data() as DiaryEntry);
+        });
+
+        // 2. Fetch Tasks
+        const tasksSnap = await getDocs(collection(db, "users", user.uid, "weekly_tasks"));
+        const fbTasks: WeeklyTask[] = [];
+        tasksSnap.forEach(tDoc => {
+          fbTasks.push(tDoc.data() as WeeklyTask);
+        });
+
+        // 3. Fetch Events
+        const eventsSnap = await getDocs(collection(db, "users", user.uid, "monthly_events"));
+        const fbEvents: MonthlyEvent[] = [];
+        eventsSnap.forEach(eDoc => {
+          fbEvents.push(eDoc.data() as MonthlyEvent);
+        });
+
+        // 4. Fetch Categories
+        const categoriesSnap = await getDocs(collection(db, "users", user.uid, "categories"));
+        const fbCategories: Category[] = [];
+        categoriesSnap.forEach(cDoc => {
+          fbCategories.push(cDoc.data() as Category);
+        });
+
+        // See if user already has data stored in the Cloud
+        const hasCloudDataSet = fbDiary.length > 0 || fbTasks.length > 0 || fbEvents.length > 0 || fbCategories.length > 0;
+
+        if (hasCloudDataSet) {
+          console.log("[FIRESTORE] Cloud dataset found. Replacing local states.");
+          // Update local state with Cloud values
+          const finalDiary = fbDiary;
+          const finalTasks = fbTasks;
+          const finalEvents = fbEvents;
+          const finalCategories = fbCategories.length > 0 ? fbCategories : parsedCategories;
+
+          setDiaryEntries(finalDiary);
+          setWeeklyTasks(finalTasks);
+          setMonthlyEvents(finalEvents);
+          setCategories(finalCategories);
+
+          lastSyncStateRef.current = {
+            diary: finalDiary,
+            tasks: finalTasks,
+            events: finalEvents,
+            categories: finalCategories
+          };
+        } else {
+          console.log("[FIRESTORE] Firestore is empty. Seeding current dataset to Cloud...");
+          // Seed local data to Firestore as a batch
+          const batch = writeBatch(db);
+          
+          parsedDiary.forEach(item => {
+            batch.set(doc(db, "users", user.uid, "diary_entries", item.id), item);
+          });
+          parsedTasks.forEach(item => {
+            batch.set(doc(db, "users", user.uid, "weekly_tasks", item.id), item);
+          });
+          parsedEvents.forEach(item => {
+            batch.set(doc(db, "users", user.uid, "monthly_events", item.id), item);
+          });
+          parsedCategories.forEach(item => {
+            batch.set(doc(db, "users", user.uid, "categories", item.id), item);
+          });
+
+          await batch.commit();
+          console.log("[FIRESTORE] Cloud seeding finished.");
+        }
+
+        isDbLoadedRef.current = true;
+        dataLoadedRef.current = user.uid;
+        setSyncError(null);
+
+        // Auto-trigger synchronizer on login
+        setTimeout(() => {
+          triggerSync(currentTokenRef.current || 'simulated_developer_bypass_token', user.uid);
+        }, 500);
+
+      } catch (err: any) {
+        console.error("[FIRESTORE] Error synchronizing initial load: ", err);
+        // Fallback to local storage (already loaded, set loaded flag to true so operational)
+        // Set flag to true so changes can still be attempted
+        isDbLoadedRef.current = true;
+        dataLoadedRef.current = user.uid;
+      }
+    };
+
+    syncFromFirestore();
+
   }, [user, authLoading]);
 
   // Keep a ref of Token for async hooks
@@ -169,15 +278,102 @@ export default function App() {
     currentTokenRef.current = token;
   }, [token]);
 
-  // Automanaged client side backups
+  // Automanaged cloud and client side backups
   useEffect(() => {
-    if (!user || dataLoadedRef.current !== user.uid) return;
-    const keyPrefix = `user_${user.uid}_cogwheel`;
+    if (!user || !isDbLoadedRef.current || dataLoadedRef.current !== user.uid) return;
+    const uid = user.uid;
+    const keyPrefix = `user_${uid}_cogwheel`;
 
+    // LocalStorage backup
     localStorage.setItem(`${keyPrefix}_diary_entries`, JSON.stringify(diaryEntries));
     localStorage.setItem(`${keyPrefix}_weekly_tasks`, JSON.stringify(weeklyTasks));
     localStorage.setItem(`${keyPrefix}_monthly_events`, JSON.stringify(monthlyEvents));
     localStorage.setItem(`${keyPrefix}_categories`, JSON.stringify(categories));
+
+    // Async Cloud Upload
+    const pushChangesToCloud = async () => {
+      try {
+        const last = lastSyncStateRef.current;
+
+        // 1. Diary entries sync
+        const lastDiaryMap = new Map(last.diary.map(d => [d.id, d]));
+        const currDiaryMap = new Map(diaryEntries.map(d => [d.id, d]));
+
+        for (const item of diaryEntries) {
+          const lItem = lastDiaryMap.get(item.id);
+          if (!lItem || JSON.stringify(lItem) !== JSON.stringify(item)) {
+            await setDoc(doc(db, "users", uid, "diary_entries", item.id), item);
+          }
+        }
+        for (const item of last.diary) {
+          if (!currDiaryMap.has(item.id)) {
+            await deleteDoc(doc(db, "users", uid, "diary_entries", item.id));
+          }
+        }
+
+        // 2. Weekly tasks sync
+        const lastTasksMap = new Map(last.tasks.map(t => [t.id, t]));
+        const currTasksMap = new Map(weeklyTasks.map(t => [t.id, t]));
+
+        for (const item of weeklyTasks) {
+          const lItem = lastTasksMap.get(item.id);
+          if (!lItem || JSON.stringify(lItem) !== JSON.stringify(item)) {
+            await setDoc(doc(db, "users", uid, "weekly_tasks", item.id), item);
+          }
+        }
+        for (const item of last.tasks) {
+          if (!currTasksMap.has(item.id)) {
+            await deleteDoc(doc(db, "users", uid, "weekly_tasks", item.id));
+          }
+        }
+
+        // 3. Monthly events sync
+        const lastEventsMap = new Map(last.events.map(e => [e.id, e]));
+        const currEventsMap = new Map(monthlyEvents.map(e => [e.id, e]));
+
+        for (const item of monthlyEvents) {
+          const lItem = lastEventsMap.get(item.id);
+          if (!lItem || JSON.stringify(lItem) !== JSON.stringify(item)) {
+            await setDoc(doc(db, "users", uid, "monthly_events", item.id), item);
+          }
+        }
+        for (const item of last.events) {
+          if (!currEventsMap.has(item.id)) {
+            await deleteDoc(doc(db, "users", uid, "monthly_events", item.id));
+          }
+        }
+
+        // 4. Categories sync
+        const lastCategoriesMap = new Map(last.categories.map(c => [c.id, c]));
+        const currCategoriesMap = new Map(categories.map(c => [c.id, c]));
+
+        for (const item of categories) {
+          const lItem = lastCategoriesMap.get(item.id);
+          if (!lItem || JSON.stringify(lItem) !== JSON.stringify(item)) {
+            await setDoc(doc(db, "users", uid, "categories", item.id), item);
+          }
+        }
+        for (const item of last.categories) {
+          if (!currCategoriesMap.has(item.id)) {
+            await deleteDoc(doc(db, "users", uid, "categories", item.id));
+          }
+        }
+
+        // Update Sync state ref to prevent loop
+        lastSyncStateRef.current = {
+          diary: [...diaryEntries],
+          tasks: [...weeklyTasks],
+          events: [...monthlyEvents],
+          categories: [...categories]
+        };
+
+      } catch (err: any) {
+        console.error("[FIRESTORE INC SYNC ERROR]", err);
+      }
+    };
+
+    pushChangesToCloud();
+
   }, [diaryEntries, weeklyTasks, monthlyEvents, categories, user]);
 
   // Polling logic & Focus event subscription (Spec: 45초 폴링)

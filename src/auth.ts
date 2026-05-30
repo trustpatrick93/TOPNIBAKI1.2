@@ -1,5 +1,6 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User, signOut } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
 import defaultFirebaseConfig from '../firebase-applet-config.json';
 
 // Support overriding Firebase configurations cleanly through Vercel/GitHub pages environment variables
@@ -17,6 +18,7 @@ const firebaseConfig = {
 // Initialize Firebase safely
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
+export const db = getFirestore(app);
 
 const provider = new GoogleAuthProvider();
 // Required scopes

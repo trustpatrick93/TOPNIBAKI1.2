@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "DiaryEntry": {
+      "title": "DiaryEntry",
+      "description": "Retro journal log entries logged by the user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "category": { "type": "string" }
+      },
+      "required": ["id", "content", "createdAt", "category"]
+    },
+    "WeeklyTask": {
+      "title": "WeeklyTask",
+      "description": "Weekly task checklist item.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "dayOfWeek": { "type": "number" },
+        "title": { "type": "string" },
+        "timeStart": { "type": "string" },
+        "timeEnd": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "syncTarget": { "type": "boolean" },
+        "gcalEventId": { "type": "string" },
+        "monthlyEventId": { "type": "string" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "dayOfWeek", "title", "timeStart", "timeEnd", "completed", "syncTarget"]
+    },
+    "MonthlyEvent": {
+      "title": "MonthlyEvent",
+      "description": "Event on the monthly schedule board.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "start": { "type": "string" },
+        "end": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "completed", "canceled"] },
+        "cancelReason": { "type": "string" },
+        "gcalEventId": { "type": "string" },
+        "isGcalOnly": { "type": "boolean" },
+        "weeklyTaskId": { "type": "string" }
+      },
+      "required": ["id", "title", "start", "end", "status"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Customized retro diary categories.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" }
+      },
+      "required": ["id", "name", "color"]
+    }
+  },
+  "firestore": {
+    "users/{userId}/diary_entries/{entryId}": {
+      "schema": "DiaryEntry",
+      "description": "Individual daily journal entries for a user."
+    },
+    "users/{userId}/weekly_tasks/{taskId}": {
+      "schema": "WeeklyTask",
+      "description": "Individual weekly tasks for a user."
+    },
+    "users/{userId}/monthly_events/{eventId}": {
+      "schema": "MonthlyEvent",
+      "description": "Individual monthly schedule events/items for a user."
+    },
+    "users/{userId}/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Personalized categories created by a user."
+    }
+  }
+}
