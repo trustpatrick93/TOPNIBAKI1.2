@@ -1,0 +1,6 @@
+{
+  "name": "톱니바퀴 스케줄 플랫폼",
+  "description": "Cozy Retro Technical 감성의 고대비 주간 체크리스트, 월간 연동 보드, 카테고리 기반 일지 기록 시스템 및 고성능 구글 캘린더 양방향 실시간 동기화 에코시스템.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

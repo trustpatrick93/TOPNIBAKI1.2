@@ -1,0 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,600;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-serif: "Playfair Display", Georgia, serif;
+}
+
+/* Custom Scrollbar styled nicely for vintage-tech aesthetic */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(28, 28, 26, 0.05);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(28, 28, 26, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(28, 28, 26, 0.4);
+}
+
+/* Base style offsets */
+body {
+  background-color: #f7f5ef; /* Soft extra-light cream */
+  color: #1c1c1a;
+  font-family: var(--font-sans);
+}
