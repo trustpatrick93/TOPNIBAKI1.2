@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldAlert, Globe, ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { ShieldAlert, Globe, ChevronDown, ChevronUp, Info, Calendar } from 'lucide-react';
+import defaultFirebaseConfig from '../../firebase-applet-config.json';
 
 export default function ErrorGuideCard() {
   const [showVercelGuide, setShowVercelGuide] = useState(false);
   const [showOAuthGuide, setShowOAuthGuide] = useState(false);
+  const [showApiGuide, setShowApiGuide] = useState(false);
+
+  const projectId = defaultFirebaseConfig.projectId || 'patrickroom-93';
 
   return (
     <div className="w-full max-w-md mx-auto bg-stone-50 border border-stone-200 rounded-xl p-5 shadow-sm font-sans">
@@ -41,10 +45,10 @@ export default function ErrorGuideCard() {
                 <div className="p-3 bg-stone-50 border-t border-stone-200 text-xs text-stone-600 space-y-2 leading-relaxed">
                   <p className="font-semibold text-rose-700">원인: Firebase Authentication 승인 도메인에 해당 주소가 추가되지 않았습니다.</p>
                   <ol className="list-decimal pl-4 space-y-1.5 font-mono text-[11px] text-stone-500">
-                    <li>Firebase 콘솔 &gt; Authentication으로 접근</li>
+                    <li>Google Cloud / Firebase 콘솔 &gt; Authentication으로 접근</li>
                     <li><strong>Settings</strong> 탭 &gt; <strong>Authorized domains</strong> 선택</li>
-                    <li><strong>Add domain</strong>을 누르고 현재 브라우저 주소의 도메인(<span className="font-semibold text-stone-800">ais-dev-kzf4hunwlfgirjrrs55cmf-782041381308.asia-east1.run.app</span> 등)을 추가해 주십시오.</li>
-                   </ol>
+                    <li><strong>Add domain</strong>을 누르고 현재 웹사이트 주소의 도메인을 입력하여 추가해 주십시오. (예: <span className="font-semibold text-stone-800">ais-dev-kzf4hunwlfgirjrrs55cmf-782041381308.asia-east1.run.app</span> 혹은 배포한 Vercel 도메인)</li>
+                  </ol>
                 </div>
               </motion.div>
             )}
@@ -80,6 +84,52 @@ export default function ErrorGuideCard() {
                     <li><strong>테스트 사용자 (Test users)</strong> 섹션에서 [Add Users] 선택</li>
                     <li>로그인을 시도하는 본인의 구글 이메일(<span className="font-semibold text-stone-800">hgfd930906@gmail.com</span> 등)을 추가해야 차단이 해결됩니다.</li>
                   </ul>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Guide Toggle 3 */}
+        <div className="border border-stone-200 rounded-lg overflow-hidden bg-white">
+          <button
+            onClick={() => setShowApiGuide(!showApiGuide)}
+            className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium text-stone-700 hover:bg-stone-50 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-left">
+              <Calendar className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>로그인 후 [Sync failed / 403 API Error] 발생</span>
+            </span>
+            {showApiGuide ? <ChevronUp className="w-3.5 h-3.5 text-stone-400" /> : <ChevronDown className="w-3.5 h-3.5 text-stone-400" />}
+          </button>
+          
+          <AnimatePresence initial={false}>
+            {showApiGuide && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="p-3 bg-stone-50 border-t border-stone-200 text-xs text-stone-600 space-y-2 leading-relaxed">
+                  <p className="font-semibold text-rose-700">원인: 새로 변경하신 Firebase Google Cloud 프로젝트에 Google Calendar API가 활성화되지 않았습니다.</p>
+                  <ol className="list-decimal pl-4 space-y-1.5 font-mono text-[11px] text-stone-500">
+                    <li>
+                      <a 
+                        href={`https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=${projectId}`}
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="text-amber-700 font-bold underline hover:text-amber-800"
+                      >
+                        [GCP Calendar API 라이브러리 이동]
+                      </a> 
+                      링크를 클릭하여 접속해 주세요.
+                    </li>
+                    <li>접속한 페이지 우상단의 활성 프로젝트 명이 <span className="font-semibold text-stone-800">{projectId}</span>인지 확인합니다.</li>
+                    <li>화면 중앙의 파란색 <strong>사용 (Enable)</strong> 버튼을 클릭하여 API를 활성화해 주십시오.</li>
+                    <li>활성화 후 앱에서 새로고침하거나 상단 우측의 <strong>[동기화 반영]</strong> 버튼을 누르면 정상 동작합니다.</li>
+                  </ol>
                 </div>
               </motion.div>
             )}

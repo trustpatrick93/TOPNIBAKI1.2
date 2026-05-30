@@ -65,6 +65,7 @@ export default function App() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'dashboard' | 'archive'>('dashboard');
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Time tracker for visual retro touch
   const [currentTime, setCurrentTime] = useState<string>('');
@@ -135,6 +136,7 @@ export default function App() {
       setWeeklyTasks(loadedTasks ? JSON.parse(loadedTasks) : INITIAL_LOCAL_TASKS);
       setMonthlyEvents(loadedEvents ? JSON.parse(loadedEvents) : INITIAL_MONTHLY_EVENTS);
       setCategories(parsedCategories);
+      setSyncError(null);
 
       dataLoadedRef.current = user.uid;
       
@@ -149,6 +151,7 @@ export default function App() {
       setWeeklyTasks([]);
       setMonthlyEvents([]);
       setCategories(DEFAULT_CATEGORIES);
+      setSyncError(null);
       dataLoadedRef.current = null;
     }
   }, [user, authLoading]);
@@ -210,6 +213,7 @@ export default function App() {
     try {
       console.log("Beginning Google Calendar 2-way real-time synchronizer...");
       const gcalEvents = await fetchGoogleCalendarEvents(accessToken);
+      setSyncError(null);
 
       // Perform bidirectional diff checks:
       setMonthlyEvents((currentEvents) => {
@@ -283,7 +287,16 @@ export default function App() {
 
     } catch (err: any) {
       console.warn("Real-time sync alert:", err);
-      showToast(`⚠️ Sync failed: 파이어베이스 인증 정보 또는 토큰이 만료되었습니다.`);
+      const errMsg = err?.message || String(err);
+      setSyncError(errMsg);
+
+      let toastMsg = `⚠️ Sync failed: 파이어베이스 인증 정보 또는 토큰이 만료되었습니다.`;
+      if (errMsg.includes('403')) {
+        toastMsg = `⚠️ Sync failed (403): Google Calendar API 활성화 또는 권한 확인이 필요합니다.`;
+      } else if (errMsg.includes('401')) {
+        toastMsg = `⚠️ Sync failed (401): 인증 토큰이 만료되었습니다. 다시 로그인해 주세요.`;
+      }
+      showToast(toastMsg);
     } finally {
       setIsSyncing(false);
     }
@@ -913,6 +926,57 @@ export default function App() {
                 </button>
               </div>
             </header>
+
+            {/* Google Calendar Sync Error Diagnostic Alert Banner */}
+            <AnimatePresence>
+              {syncError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="bg-amber-50 border-2 border-amber-500 rounded-lg p-5 font-mono text-xs text-stone-800 space-y-3 shadow-sm"
+                >
+                  <div className="flex items-center gap-2 font-bold text-amber-700 text-sm">
+                    <AlertCircle className="w-5 h-5 shrink-0 animate-bounce" />
+                    <span>⚠️ 구글 캘린더 실시간 동기화 에러 (Google Calendar Sync Error)</span>
+                  </div>
+                  
+                  <div className="space-y-2 leading-relaxed">
+                    <p>
+                      최근 시도된 구글 캘린더 연동 과정에서 아래와 같은 세부 오류가 감지되었습니다:
+                    </p>
+                    <code className="block bg-stone-900 text-stone-100 p-3 rounded overflow-x-auto text-[11px] font-mono whitespace-pre-wrap border-l-4 border-amber-500">
+                      {syncError}
+                    </code>
+                  </div>
+
+                  <div className="bg-white p-4 border border-amber-200 rounded text-[11px] space-y-2.5 text-stone-600 leading-normal">
+                    <p className="font-bold text-rose-700 flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 shrink-0 text-rose-600" />
+                      <span>💡 403 오류 (Forbidden/Disabled) 해결 방법:</span>
+                    </p>
+                    <p>
+                      새로 연동하신 Firebase / Google Cloud 프로젝트(<span className="font-semibold text-stone-800">patrickroom-93</span>) 웹 콘솔에서 <strong>Google Calendar API</strong>가 비활성화되어 있을 가능성이 높습니다.
+                    </p>
+                    <ol className="list-decimal pl-4 space-y-2 font-sans">
+                      <li>
+                        <a
+                          href="https://console.cloud.google.com/apis/library/calendar-json.googleapis.com?project=patrickroom-93"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-amber-700 font-bold underline hover:text-amber-900 inline-flex items-center gap-1"
+                        >
+                          [여기를 클릭하여 구글 클라우드 API 라이브러리로 원클릭 이동] ➡️
+                        </a>
+                      </li>
+                      <li>접속 창 오른쪽 위에 활성화된 프로젝트 ID가 <span className="font-semibold text-[#1c1c1a] bg-stone-100 px-1 rounded">patrickroom-93</span>인지 확인합니다.</li>
+                      <li>화면 중앙의 파란색 <strong>사용 (Enable)</strong> 버튼을 눌러 활성화해 주십시오.</li>
+                      <li>활성화 완료 후, 이 화면으로 돌아와 우상단의 <strong>[동기화 반영]</strong> 버튼을 누르면 즉시 동기화가 성공합니다!</li>
+                    </ol>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Retro Tab View Selector */}
             <div className="flex border-b border-[#ece9e0] gap-1 pt-1">
