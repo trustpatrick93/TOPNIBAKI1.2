@@ -49,6 +49,13 @@ const INITIAL_MONTHLY_EVENTS: MonthlyEvent[] = [
   { id: 'local-evt-2', title: '☕ Retro Cozy Coffee Break', start: '2026-05-29T15:00:00', end: '2026-05-29T15:30:00', status: 'completed' },
 ];
 
+const formatLocalDateStr = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const dateVal = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${dateVal}`;
+};
+
 export default function App() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -350,7 +357,7 @@ export default function App() {
     let targetDateStr = dateStr;
     if (!targetDateStr) {
       const baseDate = new Date(2026, 4, 24 + dayOfWeek); 
-      targetDateStr = baseDate.toISOString().substring(0, 10);
+      targetDateStr = formatLocalDateStr(baseDate);
     }
     const startIso = `${targetDateStr}T${timeStart}:00`;
     const endIso = `${targetDateStr}T${timeEnd}:00`;
@@ -408,8 +415,9 @@ export default function App() {
           // If synced with Google Calendar, update the completed status tag dynamically
           if (t.gcalEventId) {
             const baseDate = new Date(2026, 4, 24 + t.dayOfWeek); 
-            const startIso = `${baseDate.toISOString().substring(0, 10)}T${t.timeStart}:00`;
-            const endIso = `${baseDate.toISOString().substring(0, 10)}T${t.timeEnd}:00`;
+            const formattedDate = formatLocalDateStr(baseDate);
+            const startIso = `${formattedDate}T${t.timeStart}:00`;
+            const endIso = `${formattedDate}T${t.timeEnd}:00`;
 
             updateGoogleCalendarEvent(token || 'simulated_developer_bypass_token', t.gcalEventId, {
               title: t.title,
@@ -461,7 +469,7 @@ export default function App() {
           let targetDateStr = updated.dateStr || t.date;
           if (!targetDateStr) {
             const baseDate = new Date(2026, 4, 24 + updated.dayOfWeek); 
-            targetDateStr = baseDate.toISOString().substring(0, 10);
+            targetDateStr = formatLocalDateStr(baseDate);
           }
           const startIso = `${targetDateStr}T${updated.timeStart}:00`;
           const endIso = `${targetDateStr}T${updated.timeEnd}:00`;
@@ -532,7 +540,7 @@ export default function App() {
     let targetDate = targetDateStr || original.date;
     if (!targetDate) {
       const baseDate = new Date(2026, 4, 24 + targetDayOfWeek); 
-      targetDate = baseDate.toISOString().substring(0, 10);
+      targetDate = formatLocalDateStr(baseDate);
     }
     const startIso = `${targetDate}T${original.timeStart}:00`;
     const endIso = `${targetDate}T${original.timeEnd}:00`;

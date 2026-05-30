@@ -169,7 +169,7 @@ export default function WeeklyChecklistCard({
     const cleanedTitle = stripEmojisAndSymbols(title);
     if (!cleanedTitle) return;
 
-    onAddTask(cleanedTitle, selectedDayForAdd, timeStart, timeEnd, syncTarget);
+    onAddTask(cleanedTitle, selectedDayForAdd, timeStart, timeEnd, syncTarget, weekDates[selectedDayForAdd]?.dateKey);
     
     // Clear state
     setTitle('');
@@ -861,7 +861,7 @@ export default function WeeklyChecklistCard({
                           type="button"
                           disabled={isCurrent}
                           onClick={() => {
-                            onCopyTask(selectedTaskForAction.id, day.value);
+                            onCopyTask(selectedTaskForAction.id, day.value, weekDates[day.value]?.dateKey);
                             setSelectedTaskForAction(null);
                           }}
                           className={`p-2.5 border rounded-lg text-xs font-mono font-bold text-center transition-colors cursor-pointer ${
