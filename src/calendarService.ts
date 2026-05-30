@@ -105,6 +105,22 @@ export async function fetchGoogleCalendarEvents(accessToken: string): Promise<Mo
   }
 }
 
+// Ensure the local YYYY-MM-DDThh:mm:ss is converted to fully compliant RFC3339 with local timezone offset
+export function formatRFC3339(dateTimeStr: string): string {
+  if (!dateTimeStr) return dateTimeStr;
+  // If it already concludes with Z or a timezone offset like +09:00 / -05:00, return as-is
+  if (dateTimeStr.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dateTimeStr)) {
+    return dateTimeStr;
+  }
+  // Construct timezone offset dynamically
+  const offset = new Date().getTimezoneOffset();
+  const absOffset = Math.abs(offset);
+  const hours = String(Math.floor(absOffset / 60)).padStart(2, '0');
+  const mins = String(absOffset % 60).padStart(2, '0');
+  const sign = offset <= 0 ? '+' : '-';
+  return `${dateTimeStr}${sign}${hours}:${mins}`;
+}
+
 // Create a Google Calendar event
 export async function createGoogleCalendarEvent(
   accessToken: string,
@@ -134,8 +150,8 @@ export async function createGoogleCalendarEvent(
   const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Seoul';
 
   if (event.start.includes('T')) {
-    startObj = { dateTime: event.start, timeZone: localTimeZone };
-    endObj = { dateTime: event.end, timeZone: localTimeZone };
+    startObj = { dateTime: formatRFC3339(event.start), timeZone: localTimeZone };
+    endObj = { dateTime: formatRFC3339(event.end), timeZone: localTimeZone };
   } else {
     // All day
     startObj = { date: event.start.substring(0, 10) };
@@ -202,8 +218,8 @@ export async function updateGoogleCalendarEvent(
   const localTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Seoul';
 
   if (event.start.includes('T')) {
-    startObj = { dateTime: event.start, timeZone: localTimeZone };
-    endObj = { dateTime: event.end, timeZone: localTimeZone };
+    startObj = { dateTime: formatRFC3339(event.start), timeZone: localTimeZone };
+    endObj = { dateTime: formatRFC3339(event.end), timeZone: localTimeZone };
   } else {
     startObj = { date: event.start.substring(0, 10) };
     endObj = { date: event.end.substring(0, 10) };

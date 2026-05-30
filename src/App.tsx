@@ -365,16 +365,23 @@ export default function App() {
 
     if (syncTarget && user) {
       // Create associated event in Google Calendar:
-      const id = await createGoogleCalendarEvent(token || 'simulated_developer_bypass_token', {
-        title,
-        start: startIso,
-        end: endIso,
-        status: 'pending'
-      });
-      if (id) {
-        gcalId = id;
-      } else {
+      try {
+        const id = await createGoogleCalendarEvent(token || 'simulated_developer_bypass_token', {
+          title,
+          start: startIso,
+          end: endIso,
+          status: 'pending'
+        });
+        if (id) {
+          gcalId = id;
+          setSyncError(null);
+        } else {
+          syncErrorDectected = true;
+          setSyncError("Google Calendar API Error (403/Forbidden or 401/Unauthorized) - Check if Google Calendar API is enabled in your Google Cloud platform.");
+        }
+      } catch (err: any) {
         syncErrorDectected = true;
+        setSyncError(err?.message || String(err));
       }
     }
 
