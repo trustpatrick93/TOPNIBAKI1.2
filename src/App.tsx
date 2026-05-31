@@ -207,17 +207,85 @@ export default function App() {
           fbCategories.push(cDoc.data() as Category);
         });
 
-        // See if user already has data stored in the Cloud
-        const hasCloudDataSet = fbDiary.length > 0 || fbTasks.length > 0 || fbEvents.length > 0 || fbCategories.length > 0;
+        let finalDiary = [...fbDiary];
+        let finalTasks = [...fbTasks];
+        let finalEvents = [...fbEvents];
+        let finalCategories = fbCategories.length > 0 ? [...fbCategories] : [...parsedCategories];
+        let hasCloudDataSet = fbDiary.length > 0 || fbTasks.length > 0 || fbEvents.length > 0 || fbCategories.length > 0;
+        let migrationHappened = false;
+
+        // Check if there is legacy data under the bypass path to migrate
+        if (user.email && !user.uid.startsWith("bypass_")) {
+          const bypassUid = "bypass_" + user.email.replace(/[^a-zA-Z0-9]/g, "_");
+          try {
+            const bpDiarySnap = await getDocs(collection(db, "users", bypassUid, "diary_entries"));
+            const bpTasksSnap = await getDocs(collection(db, "users", bypassUid, "weekly_tasks"));
+            const bpEventsSnap = await getDocs(collection(db, "users", bypassUid, "monthly_events"));
+            const bpCategoriesSnap = await getDocs(collection(db, "users", bypassUid, "categories"));
+            
+            const hasBypassData = bpDiarySnap.size > 0 || bpTasksSnap.size > 0 || bpEventsSnap.size > 0 || bpCategoriesSnap.size > 0;
+            
+            if (hasBypassData && !hasCloudDataSet) {
+              console.log("[MIGRATION] Found legacy data in bypass account. Migrating to genuine Google Account UID...");
+              const batch = writeBatch(db);
+              
+              bpDiarySnap.forEach(docSnap => {
+                const data = docSnap.data();
+                batch.set(doc(db, "users", user.uid, "diary_entries", docSnap.id), data);
+                finalDiary.push(data as DiaryEntry);
+              });
+              
+              bpTasksSnap.forEach(docSnap => {
+                const data = docSnap.data();
+                batch.set(doc(db, "users", user.uid, "weekly_tasks", docSnap.id), data);
+                finalTasks.push(data as WeeklyTask);
+              });
+              
+              bpEventsSnap.forEach(docSnap => {
+                const data = docSnap.data();
+                batch.set(doc(db, "users", user.uid, "monthly_events", docSnap.id), data);
+                finalEvents.push(data as MonthlyEvent);
+              });
+              
+              bpCategoriesSnap.forEach(docSnap => {
+                const data = docSnap.data();
+                batch.set(doc(db, "users", user.uid, "categories", docSnap.id), data);
+                if (!fbCategories.some(c => c.id === docSnap.id)) {
+                  finalCategories.push(data as Category);
+                }
+              });
+              
+              await batch.commit();
+              console.log("[MIGRATION] Firestore legacy migration complete!");
+              
+              // Clean up old bypass data
+              const delBatch = writeBatch(db);
+              bpDiarySnap.forEach(docSnap => {
+                delBatch.delete(doc(db, "users", bypassUid, "diary_entries", docSnap.id));
+              });
+              bpTasksSnap.forEach(docSnap => {
+                delBatch.delete(doc(db, "users", bypassUid, "weekly_tasks", docSnap.id));
+              });
+              bpEventsSnap.forEach(docSnap => {
+                delBatch.delete(doc(db, "users", bypassUid, "monthly_events", docSnap.id));
+              });
+              bpCategoriesSnap.forEach(docSnap => {
+                delBatch.delete(doc(db, "users", bypassUid, "categories", docSnap.id));
+              });
+              await delBatch.commit();
+              console.log("[MIGRATION] Legacy bypass data cleaned up.");
+              
+              migrationHappened = true;
+              hasCloudDataSet = true;
+            }
+          } catch (bpErr) {
+            console.warn("[MIGRATION WARNING] Failed to migrate bypass data:", bpErr);
+          }
+        }
 
         if (hasCloudDataSet) {
           console.log("[FIRESTORE] Cloud dataset found. Replacing local states.");
           // Update local state with Cloud values
-          const finalDiary = fbDiary;
-          const finalTasks = fbTasks;
-          const finalEvents = fbEvents;
-          const finalCategories = fbCategories.length > 0 ? fbCategories : parsedCategories;
-
           setDiaryEntries(finalDiary);
           setWeeklyTasks(finalTasks);
           setMonthlyEvents(finalEvents);
@@ -229,6 +297,10 @@ export default function App() {
             events: finalEvents,
             categories: finalCategories
           };
+
+          if (migrationHappened) {
+            showToast("🎉 이전 이메일 간편 로그인으로 작성하셨던 모든 일정과 일지가 Google 공식 계정으로 안전하게 자동 이관 연동되었습니다!");
+          }
         } else {
           console.log("[FIRESTORE] Firestore is empty. Seeding current dataset to Cloud...");
           // Seed local data to Firestore as a batch
