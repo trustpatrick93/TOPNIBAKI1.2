@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 
 import { DiaryEntry, WeeklyTask, MonthlyEvent, Category, EventStatus } from './types';
-import { googleSignIn, logoutUser, initAuth, AppUser, db } from './auth';
+import { googleSignIn, logoutUser, initAuth, AppUser, db, developerBypassSignIn } from './auth';
 import { collection, getDocs, setDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { fetchGoogleCalendarEvents, createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from './calendarService';
 
@@ -77,6 +77,10 @@ export default function App() {
 
   // Time tracker for visual retro touch
   const [currentTime, setCurrentTime] = useState<string>('');
+
+  // Bypass login states for troubleshooting and device syncing
+  const [bypassEmail, setBypassEmail] = useState('hgfd930906@gmail.com');
+  const [showBypassInput, setShowBypassInput] = useState(false);
 
   // Track state change to save
   const dataLoadedRef = useRef<string | null>(null);
@@ -509,6 +513,63 @@ export default function App() {
   const handleImmediateManualSync = () => {
     if (!user) return;
     triggerSync(token || 'simulated_developer_bypass_token', user.uid);
+  };
+
+  // Pure Firestore Cloud Sync (Pull/Download) Force Trigger
+  const handleManualCloudSync = async () => {
+    if (!user) return;
+    setIsSyncing(true);
+    showToast("☁️ 클라우드 DB로부터 동기화 데이터를 내려받고 있습니다...");
+    try {
+      const diarySnap = await getDocs(collection(db, "users", user.uid, "diary_entries"));
+      const fbDiary: DiaryEntry[] = [];
+      diarySnap.forEach(dDoc => {
+        fbDiary.push(dDoc.data() as DiaryEntry);
+      });
+
+      const tasksSnap = await getDocs(collection(db, "users", user.uid, "weekly_tasks"));
+      const fbTasks: WeeklyTask[] = [];
+      tasksSnap.forEach(tDoc => {
+        fbTasks.push(tDoc.data() as WeeklyTask);
+      });
+
+      const eventsSnap = await getDocs(collection(db, "users", user.uid, "monthly_events"));
+      const fbEvents: MonthlyEvent[] = [];
+      eventsSnap.forEach(eDoc => {
+        fbEvents.push(eDoc.data() as MonthlyEvent);
+      });
+
+      const categoriesSnap = await getDocs(collection(db, "users", user.uid, "categories"));
+      const fbCategories: Category[] = [];
+      categoriesSnap.forEach(cDoc => {
+        fbCategories.push(cDoc.data() as Category);
+      });
+
+      const hasCloudDataSet = fbDiary.length > 0 || fbTasks.length > 0 || fbEvents.length > 0 || fbCategories.length > 0;
+      if (hasCloudDataSet) {
+        setDiaryEntries(fbDiary);
+        setWeeklyTasks(fbTasks);
+        setMonthlyEvents(fbEvents);
+        if (fbCategories.length > 0) {
+          setCategories(fbCategories);
+        }
+
+        lastSyncStateRef.current = {
+          diary: fbDiary,
+          tasks: fbTasks,
+          events: fbEvents,
+          categories: fbCategories.length > 0 ? fbCategories : categories
+        };
+        showToast("✅ 클라우드 정밀 동기화가 성료되었습니다.");
+      } else {
+        showToast("ℹ️ 클라우드 원격 저장소가 비어 있습니다. 로컬 데이터가 보존됩니다.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast("❌ 동기화 실패: Firestore 연결이 원활하지 않습니다.");
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Actions handlers
@@ -950,6 +1011,23 @@ export default function App() {
     }
   };
 
+  const handleBypassLogin = () => {
+    try {
+      if (!bypassEmail.trim()) {
+        showToast("⚠️ 올바른 이메일 형식을 입력해 주십시오.");
+        return;
+      }
+      setAuthLoading(true);
+      developerBypassSignIn(bypassEmail.trim());
+      showToast("⚙️ 개발자 우회 연동으로 로그인되었습니다.");
+    } catch (e: any) {
+      console.error(e);
+      showToast("⚠️ 우회 로그인 도중 오류가 발생했습니다.");
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     await logoutUser();
     setUser(null);
@@ -1040,7 +1118,7 @@ export default function App() {
               </div>
 
               {/* Minimal Sign In Button */}
-              <div className="w-full flex justify-center">
+              <div className="w-full flex flex-col items-center space-y-4">
                 <button
                   onClick={handleGoogleLogin}
                   className="gsi-material-button hover:shadow-md transition-shadow cursor-pointer border border-[#d2cebf] rounded-md bg-white text-stone-900 active:bg-stone-50 w-full max-w-xs flex justify-center items-center"
@@ -1056,6 +1134,53 @@ export default function App() {
                   </div>
                   <span className="gsi-material-button-contents font-sans text-xs font-semibold whitespace-nowrap">Google 계정으로 로그인</span>
                 </button>
+
+                {/* Developer Emergency/Bypass Login Block */}
+                <div className="w-full max-w-xs pt-4 border-t border-[#e2decb] flex flex-col items-center">
+                  {!showBypassInput ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowBypassInput(true)}
+                      className="text-[10px] font-mono text-stone-500 hover:text-amber-700 hover:underline transition-colors cursor-pointer"
+                    >
+                      ⚠️ 모바일/Popup 차단 시: 개발자 우회 로그인 사용하기
+                    </button>
+                  ) : (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 5 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="w-full space-y-2 bg-[#fcfbfa] border border-[#d2cebf] rounded-md p-3 text-left shadow-sm"
+                    >
+                      <label className="text-[9px] font-mono font-bold text-stone-500 block uppercase">동기화 이메일 식별값 (Bypass ID)</label>
+                      <input 
+                        type="email"
+                        value={bypassEmail}
+                        onChange={(e) => setBypassEmail(e.target.value)}
+                        placeholder="예: hgfd930906@gmail.com"
+                        className="w-full bg-white border border-[#d2cebf] px-2.5 py-1.5 text-xs rounded font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
+                      />
+                      <p className="text-[9px] text-stone-400 font-sans leading-normal">
+                        * 동일한 이메일 ID를 입력하면 기기 간 데이터가 완벽하게 동기화됩니다.
+                      </p>
+                      <div className="flex gap-2 pt-1 font-mono">
+                        <button
+                          type="button"
+                          onClick={handleBypassLogin}
+                          className="flex-1 bg-[#1a1a19] hover:bg-stone-900 text-[10px] text-white py-1.5 rounded text-center font-bold cursor-pointer transition-colors"
+                        >
+                          우회 로그인 반영
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowBypassInput(false)}
+                          className="bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-700 px-2 rounded text-center cursor-pointer transition-colors"
+                        >
+                          취소
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -1121,21 +1246,38 @@ export default function App() {
               </div>
 
               {/* Central clock and server pollings */}
-              <div className="hidden md:flex items-center gap-6 font-mono text-xs">
-                <div className="bg-stone-800/80 border border-stone-700 px-3 py-1.5 rounded flex items-center gap-1.5 text-amber-400">
-                  <Clock className="w-3.5 h-3.5 animate-pulse" />
+              <div className="flex items-center flex-wrap gap-2 sm:gap-4 font-mono text-xs">
+                {/* Clock Indicator: hidden on micro screens, visible from sm */}
+                <div className="hidden sm:flex bg-stone-800/80 border border-stone-700 px-2.5 py-1 text-xs rounded items-center gap-1 text-amber-400">
+                  <Clock className="w-3 h-3 animate-pulse" />
                   <span>{currentTime || '12:00:00'}</span>
                 </div>
 
+                {/* DB Cloud Pull Button */}
                 <button
-                  onClick={handleImmediateManualSync}
+                  type="button"
+                  onClick={handleManualCloudSync}
                   disabled={isSyncing}
-                  className={`border border-amber-600/50 hover:border-amber-600 bg-stone-800 text-amber-500 px-3.5 py-1.5 rounded flex items-center gap-1.5 transition-all text-xs cursor-pointer shadow-inner ${
+                  className={`bg-[#2c2b2a] border border-emerald-500/50 hover:border-emerald-400 text-emerald-400 px-2.5 py-1 rounded flex items-center gap-1 bg-stone-800 text-[10px] sm:text-xs cursor-pointer transition-colors shadow-sm ${
                     isSyncing ? 'opacity-70' : ''
                   }`}
+                  title="클라우드 저장소에서 최신 일지/과제 실시간 내려받기"
                 >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-                  <span>{isSyncing ? '캘린더 연동중...' : '동기화 반영'}</span>
+                  <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>클라우드 동기화</span>
+                </button>
+
+                {/* Google Calendar Sync Button */}
+                <button
+                  type="button"
+                  onClick={handleImmediateManualSync}
+                  disabled={isSyncing}
+                  className={`bg-[#2c2b2a] border border-amber-600/50 hover:border-amber-600 text-amber-500 px-2.5 py-1 rounded flex items-center gap-1 bg-stone-800 text-[10px] sm:text-xs cursor-pointer transition-colors shadow-sm ${
+                    isSyncing ? 'opacity-70' : ''
+                  }`}
+                  title="구글 캘린더 일정과 동기화"
+                >
+                  <span>캘린더</span>
                 </button>
               </div>
 
