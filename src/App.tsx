@@ -18,7 +18,8 @@ import {
   CheckCircle,
   TrendingUp,
   Inbox,
-  Coffee
+  Coffee,
+  Mail
 } from 'lucide-react';
 
 import { DiaryEntry, WeeklyTask, MonthlyEvent, Category, EventStatus } from './types';
@@ -77,10 +78,6 @@ export default function App() {
 
   // Time tracker for visual retro touch
   const [currentTime, setCurrentTime] = useState<string>('');
-
-  // Bypass login states for troubleshooting and device syncing
-  const [bypassEmail, setBypassEmail] = useState('hgfd930906@gmail.com');
-  const [showBypassInput, setShowBypassInput] = useState(false);
 
   // Track state change to save
   const dataLoadedRef = useRef<string | null>(null);
@@ -1005,24 +1002,7 @@ export default function App() {
       await googleSignIn();
     } catch (e: any) {
       console.error(e);
-      showToast("⚠️ Firebase Auth Google 연동 실패. 개발자 우회 패스를 활용하십시오.");
-    } finally {
-      setAuthLoading(false);
-    }
-  };
-
-  const handleBypassLogin = () => {
-    try {
-      if (!bypassEmail.trim()) {
-        showToast("⚠️ 올바른 이메일 형식을 입력해 주십시오.");
-        return;
-      }
-      setAuthLoading(true);
-      developerBypassSignIn(bypassEmail.trim());
-      showToast("⚙️ 개발자 우회 연동으로 로그인되었습니다.");
-    } catch (e: any) {
-      console.error(e);
-      showToast("⚠️ 우회 로그인 도중 오류가 발생했습니다.");
+      showToast("⚠️ 로그인 실패. 카카오톡/네이버 앱인 경우 상단의 '⋯'를 눌러 사파리/크롬으로 열어주세요!");
     } finally {
       setAuthLoading(false);
     }
@@ -1117,69 +1097,54 @@ export default function App() {
                 </motion.div>
               </div>
 
-              {/* Minimal Sign In Button */}
-              <div className="w-full flex flex-col items-center space-y-4">
-                <button
-                  onClick={handleGoogleLogin}
-                  className="gsi-material-button hover:shadow-md transition-shadow cursor-pointer border border-[#d2cebf] rounded-md bg-white text-stone-900 active:bg-stone-50 w-full max-w-xs flex justify-center items-center"
-                  style={{ display: 'inline-flex', height: '44px', padding: '0 16px' }}
-                >
-                  <div className="gsi-material-button-icon" style={{ marginRight: '10px' }}>
-                    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style={{ display: 'block', width: '22px', height: '22px' }}>
-                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                    </svg>
+              {/* Login Methods Selection Board */}
+              <div className="w-full max-w-sm flex flex-col space-y-5">
+                
+                {/* METHOD: 구글 공식 간편 로그인 */}
+                <div className="bg-[#fcfbfa] border-2 border-stone-900 rounded-lg p-5 shadow-[4px_4px_0px_#1a1a19] text-center space-y-4">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-mono font-bold text-stone-800 uppercase tracking-tight">Google 계정으로 공식 로그인</h3>
+                    <p className="text-[11px] text-stone-500 font-sans">
+                      로그인하면 작성한 다이어리와 구글 캘린더가 안전하게 2-Way로 실시간 연동됩니다.
+                    </p>
                   </div>
-                  <span className="gsi-material-button-contents font-sans text-xs font-semibold whitespace-nowrap">Google 계정으로 로그인</span>
-                </button>
 
-                {/* Developer Emergency/Bypass Login Block */}
-                <div className="w-full max-w-xs pt-4 border-t border-[#e2decb] flex flex-col items-center">
-                  {!showBypassInput ? (
-                    <button
-                      type="button"
-                      onClick={() => setShowBypassInput(true)}
-                      className="text-[10px] font-mono text-stone-500 hover:text-amber-700 hover:underline transition-colors cursor-pointer"
-                    >
-                      ⚠️ 모바일/Popup 차단 시: 개발자 우회 로그인 사용하기
-                    </button>
-                  ) : (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 5 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="w-full space-y-2 bg-[#fcfbfa] border border-[#d2cebf] rounded-md p-3 text-left shadow-sm"
-                    >
-                      <label className="text-[9px] font-mono font-bold text-stone-500 block uppercase">동기화 이메일 식별값 (Bypass ID)</label>
-                      <input 
-                        type="email"
-                        value={bypassEmail}
-                        onChange={(e) => setBypassEmail(e.target.value)}
-                        placeholder="예: hgfd930906@gmail.com"
-                        className="w-full bg-white border border-[#d2cebf] px-2.5 py-1.5 text-xs rounded font-mono focus:outline-none focus:ring-1 focus:ring-amber-500"
-                      />
-                      <p className="text-[9px] text-stone-400 font-sans leading-normal">
-                        * 동일한 이메일 ID를 입력하면 기기 간 데이터가 완벽하게 동기화됩니다.
-                      </p>
-                      <div className="flex gap-2 pt-1 font-mono">
-                        <button
-                          type="button"
-                          onClick={handleBypassLogin}
-                          className="flex-1 bg-[#1a1a19] hover:bg-stone-900 text-[10px] text-white py-1.5 rounded text-center font-bold cursor-pointer transition-colors"
-                        >
-                          우회 로그인 반영
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowBypassInput(false)}
-                          className="bg-stone-100 hover:bg-stone-200 text-[10px] text-stone-700 px-2 rounded text-center cursor-pointer transition-colors"
-                        >
-                          취소
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
+                  <button
+                    onClick={handleGoogleLogin}
+                    className="gsi-material-button hover:shadow-md transition-shadow cursor-pointer border border-[#d2cebf] rounded-md bg-white text-stone-900 active:bg-stone-50 w-full flex justify-center items-center"
+                    style={{ display: 'inline-flex', height: '44px', padding: '0 16px' }}
+                  >
+                    <div className="gsi-material-button-icon" style={{ marginRight: '10px' }}>
+                      <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" style={{ display: 'block', width: '22px', height: '22px' }}>
+                        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                      </svg>
+                    </div>
+                    <span className="gsi-material-button-contents font-sans text-xs font-semibold whitespace-nowrap">Google 계정으로 로그인</span>
+                  </button>
+                </div>
+
+                {/* Mobile WebView Disallowed Useragent Prevention Banner */}
+                <div className="bg-[#fff9e6] border border-amber-300 rounded-lg p-4 space-y-3 shadow-sm text-left">
+                  <div className="flex items-center gap-1.5 text-amber-900">
+                    <span className="text-base font-bold">⚠️</span>
+                    <h4 className="text-xs font-bold font-mono">모바일 카카오톡/네이버 로그인 오류 해결법</h4>
+                  </div>
+                  
+                  <p className="text-[11px] text-stone-600 leading-relaxed font-sans">
+                    구글 보안 정책상 <strong>카카오톡, 네이버, 인스타그램, 페이스북</strong>의 자체 인앱 브라우저 내부에서는 구글 로그인을 원천 차단하여 <span className="font-bold text-rose-700">403 익스텐션(disallowed_useragent) 에러</span>가 발생합니다.
+                  </p>
+
+                  <div className="bg-white border border-amber-200/60 rounded p-2.5 space-y-2">
+                    <p className="font-bold text-[11px] text-stone-800">💡 해결 방법: 3초만에 사파리/크롬으로 전환</p>
+                    <ol className="list-decimal pl-4.5 space-y-1.5 text-[10.5px] text-stone-600 font-mono">
+                      <li>우측 하단(혹은 상단)에 있는 점 세개 <span className="font-bold text-stone-900 border border-stone-300 rounded px-1 py-0.1 bg-stone-50">⋯</span> 또는 삼선 <span className="font-bold text-stone-900 border border-stone-300 rounded px-1 py-0.1 bg-stone-50">☰</span> 아이콘을 누릅니다.</li>
+                      <li>메뉴 목록 중에서 <strong className="text-amber-800 bg-amber-50 px-1 py-0.5 rounded">"다른 브라우저로 열기"</strong> 또는 <strong className="text-amber-800 bg-amber-50 px-1 py-0.5 rounded">"Safari / Chrome으로 열기"</strong> 버튼을 터치합니다.</li>
+                      <li>익스프레스 브라우저가 열리면 오류 없이 정상적으로 연동 완료됩니다!</li>
+                    </ol>
+                  </div>
                 </div>
               </div>
             </div>

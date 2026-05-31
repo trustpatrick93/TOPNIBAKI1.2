@@ -7,6 +7,7 @@ export default function ErrorGuideCard() {
   const [showVercelGuide, setShowVercelGuide] = useState(false);
   const [showOAuthGuide, setShowOAuthGuide] = useState(false);
   const [showApiGuide, setShowApiGuide] = useState(false);
+  const [showUseragentGuide, setShowUseragentGuide] = useState(false);
 
   const projectId = defaultFirebaseConfig.projectId || 'patrickroom-93';
 
@@ -84,6 +85,55 @@ export default function ErrorGuideCard() {
                     <li><strong>테스트 사용자 (Test users)</strong> 섹션에서 [Add Users] 선택</li>
                     <li>로그인을 시도하는 본인의 구글 이메일(<span className="font-semibold text-stone-800">hgfd930906@gmail.com</span> 등)을 추가해야 차단이 해결됩니다.</li>
                   </ul>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+
+        {/* Guide Toggle 2.5: Mobile disallowed_useragent */}
+        <div className="border border-stone-200 rounded-lg overflow-hidden bg-white">
+          <button
+            type="button"
+            onClick={() => setShowUseragentGuide(!showUseragentGuide)}
+            className="w-full flex items-center justify-between px-3 py-2.5 text-xs font-medium text-stone-700 hover:bg-stone-50 transition-colors"
+          >
+            <span className="flex items-center gap-2 text-left">
+              <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+              <span className="text-rose-700 font-bold">모바일 403: disallowed_useragent 해결</span>
+            </span>
+            {showUseragentGuide ? <ChevronUp className="w-3.5 h-3.5 text-stone-400" /> : <ChevronDown className="w-3.5 h-3.5 text-stone-400" />}
+          </button>
+          
+          <AnimatePresence initial={false}>
+            {showUseragentGuide && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: 'auto', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="p-3 bg-stone-50 border-t border-stone-200 text-xs text-stone-600 space-y-2.5 leading-relaxed font-sans">
+                  <p className="font-semibold text-stone-850">
+                    💡 <span className="text-rose-700">원인:</span> 카카오톡, 네이버, 인스타그램 등 SNS 내장 브라우저 앱에서는 Google 정책상 Google OAuth 로그인을 원천적으로 차단합니다 (disallowed_useragent 오류).
+                  </p>
+                  
+                  <div className="space-y-2">
+                    <p className="font-bold text-stone-800 text-[11px] border-l-2 border-amber-600 pl-2">해결 방법 1: 이메일 간편 로그인 사용 (가장 추천)</p>
+                    <p className="text-[11px] text-stone-500 pl-2">
+                      화면 로고 하단에 있는 <strong>[1. 이메일 편의 동기화]</strong>를 사용하십시오. 비밀번호나 팝업 차단 없이 이메일만 입력하면 SNS 인앱에서도 즉시 안전하게 로그인되며, 작성한 데이터 또한 PC와 완벽히 2 Way 실시간 동기화됩니다.
+                    </p>
+                  </div>
+
+                  <div className="space-y-1">
+                    <p className="font-bold text-stone-800 text-[11px] border-l-2 border-stone-600 pl-2">해결 방법 2: 외부 정식 웹브라우저로 다시 열기</p>
+                    <ol className="list-decimal pl-6 space-y-1 text-[11px] text-stone-500 font-mono">
+                      <li>우측 하단 또는 상단의 점 세 개 <span className="font-bold text-stone-800">(⋯)</span> 버튼을 가볍게 누릅니다.</li>
+                      <li><strong>[다른 브라우저로 열기]</strong> 혹은 <strong>[웹브라우저에서 열기]</strong>(Safari / Chrome / Samsung Internet)를 터치합니다.</li>
+                      <li>연결된 기본 브라우저 창에서 정상적으로 <span className="font-bold text-stone-800">Google 로그인</span>을 시도하십시오.</li>
+                    </ol>
+                  </div>
                 </div>
               </motion.div>
             )}
