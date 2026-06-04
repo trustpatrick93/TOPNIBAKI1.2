@@ -128,10 +128,92 @@ export default function App() {
 
     // Isolated multi-user loading from localstorage first for instant start
     const keyPrefix = `user_${user.uid}_cogwheel`;
-    const loadedDiary = localStorage.getItem(`${keyPrefix}_diary_entries`);
-    const loadedTasks = localStorage.getItem(`${keyPrefix}_weekly_tasks`);
-    const loadedEvents = localStorage.getItem(`${keyPrefix}_monthly_events`);
-    const loadedCategories = localStorage.getItem(`${keyPrefix}_categories`);
+    
+    // Check and merge local storage bypass legacy data before loading
+    let loadedDiary = localStorage.getItem(`${keyPrefix}_diary_entries`);
+    let loadedTasks = localStorage.getItem(`${keyPrefix}_weekly_tasks`);
+    let loadedEvents = localStorage.getItem(`${keyPrefix}_monthly_events`);
+    let loadedCategories = localStorage.getItem(`${keyPrefix}_categories`);
+
+    if (user.email && !user.uid.startsWith("bypass_")) {
+      const bypassPrefix = `user_bypass_${user.email.replace(/[^a-zA-Z0-9]/g, "_")}_cogwheel`;
+      const bpLoadedDiary = localStorage.getItem(`${bypassPrefix}_diary_entries`);
+      const bpLoadedTasks = localStorage.getItem(`${bypassPrefix}_weekly_tasks`);
+      const bpLoadedEvents = localStorage.getItem(`${bypassPrefix}_monthly_events`);
+      const bpLoadedCategories = localStorage.getItem(`${bypassPrefix}_categories`);
+
+      let mergedHappenedLocalStorage = false;
+
+      let currentDiary: DiaryEntry[] = loadedDiary ? JSON.parse(loadedDiary) : [];
+      let currentTasks: WeeklyTask[] = loadedTasks ? JSON.parse(loadedTasks) : [];
+      let currentEvents: MonthlyEvent[] = loadedEvents ? JSON.parse(loadedEvents) : [];
+      let currentCategories: Category[] = loadedCategories ? JSON.parse(loadedCategories) : [];
+
+      if (bpLoadedDiary) {
+        try {
+          const bpDiaryArr: DiaryEntry[] = JSON.parse(bpLoadedDiary);
+          bpDiaryArr.forEach(bp => {
+            if (!currentDiary.some(c => c.id === bp.id)) {
+              currentDiary.push(bp);
+              mergedHappenedLocalStorage = true;
+            }
+          });
+        } catch (e) { console.warn("[LOCAL STORAGE RECOVERY] Failed to parse diary legacy: ", e); }
+      }
+      if (bpLoadedTasks) {
+        try {
+          const bpTasksArr: WeeklyTask[] = JSON.parse(bpLoadedTasks);
+          bpTasksArr.forEach(bp => {
+            if (!currentTasks.some(c => c.id === bp.id)) {
+              currentTasks.push(bp);
+              mergedHappenedLocalStorage = true;
+            }
+          });
+        } catch (e) { console.warn("[LOCAL STORAGE RECOVERY] Failed to parse tasks legacy: ", e); }
+      }
+      if (bpLoadedEvents) {
+        try {
+          const bpEventsArr: MonthlyEvent[] = JSON.parse(bpLoadedEvents);
+          bpEventsArr.forEach(bp => {
+            if (!currentEvents.some(c => c.id === bp.id)) {
+              currentEvents.push(bp);
+              mergedHappenedLocalStorage = true;
+            }
+          });
+        } catch (e) { console.warn("[LOCAL STORAGE RECOVERY] Failed to parse events legacy: ", e); }
+      }
+      if (bpLoadedCategories) {
+        try {
+          const bpCategoriesArr: Category[] = JSON.parse(bpLoadedCategories);
+          bpCategoriesArr.forEach(bp => {
+            if (!currentCategories.some(c => c.id === bp.id)) {
+              currentCategories.push(bp);
+              mergedHappenedLocalStorage = true;
+            }
+          });
+        } catch (e) { console.warn("[LOCAL STORAGE RECOVERY] Failed to parse categories legacy: ", e); }
+      }
+
+      if (mergedHappenedLocalStorage) {
+        console.log("[MIGRATION] Merging bypass localStorage data into genuine Google account localStorage...");
+        localStorage.setItem(`${keyPrefix}_diary_entries`, JSON.stringify(currentDiary));
+        localStorage.setItem(`${keyPrefix}_weekly_tasks`, JSON.stringify(currentTasks));
+        localStorage.setItem(`${keyPrefix}_monthly_events`, JSON.stringify(currentEvents));
+        localStorage.setItem(`${keyPrefix}_categories`, JSON.stringify(currentCategories));
+        
+        // Remove old bypass localStorage values to avoid repeating
+        localStorage.removeItem(`${bypassPrefix}_diary_entries`);
+        localStorage.removeItem(`${bypassPrefix}_weekly_tasks`);
+        localStorage.removeItem(`${bypassPrefix}_monthly_events`);
+        localStorage.removeItem(`${bypassPrefix}_categories`);
+
+        // Update loaded variables so they can be parsed below
+        loadedDiary = JSON.stringify(currentDiary);
+        loadedTasks = JSON.stringify(currentTasks);
+        loadedEvents = JSON.stringify(currentEvents);
+        loadedCategories = JSON.stringify(currentCategories);
+      }
+    }
 
     let parsedDiary: DiaryEntry[] = loadedDiary ? JSON.parse(loadedDiary) : [];
     let parsedTasks: WeeklyTask[] = loadedTasks ? JSON.parse(loadedTasks) : INITIAL_LOCAL_TASKS;
@@ -214,7 +296,7 @@ export default function App() {
         let hasCloudDataSet = fbDiary.length > 0 || fbTasks.length > 0 || fbEvents.length > 0 || fbCategories.length > 0;
         let migrationHappened = false;
 
-        // Check if there is legacy data under the bypass path to migrate
+        // Check if there is legacy data under the bypass path to migrate/merge
         if (user.email && !user.uid.startsWith("bypass_")) {
           const bypassUid = "bypass_" + user.email.replace(/[^a-zA-Z0-9]/g, "_");
           try {
@@ -225,32 +307,38 @@ export default function App() {
             
             const hasBypassData = bpDiarySnap.size > 0 || bpTasksSnap.size > 0 || bpEventsSnap.size > 0 || bpCategoriesSnap.size > 0;
             
-            if (hasBypassData && !hasCloudDataSet) {
-              console.log("[MIGRATION] Found legacy data in bypass account. Migrating to genuine Google Account UID...");
+            if (hasBypassData) {
+              console.log("[MIGRATION] Found legacy data in bypass account. Merging with genuine Google Account UID...");
               const batch = writeBatch(db);
               
               bpDiarySnap.forEach(docSnap => {
                 const data = docSnap.data();
                 batch.set(doc(db, "users", user.uid, "diary_entries", docSnap.id), data);
-                finalDiary.push(data as DiaryEntry);
+                if (!finalDiary.some(d => d.id === docSnap.id)) {
+                  finalDiary.push(data as DiaryEntry);
+                }
               });
               
               bpTasksSnap.forEach(docSnap => {
                 const data = docSnap.data();
                 batch.set(doc(db, "users", user.uid, "weekly_tasks", docSnap.id), data);
-                finalTasks.push(data as WeeklyTask);
+                if (!finalTasks.some(t => t.id === docSnap.id)) {
+                  finalTasks.push(data as WeeklyTask);
+                }
               });
               
               bpEventsSnap.forEach(docSnap => {
                 const data = docSnap.data();
                 batch.set(doc(db, "users", user.uid, "monthly_events", docSnap.id), data);
-                finalEvents.push(data as MonthlyEvent);
+                if (!finalEvents.some(e => e.id === docSnap.id)) {
+                  finalEvents.push(data as MonthlyEvent);
+                }
               });
               
               bpCategoriesSnap.forEach(docSnap => {
                 const data = docSnap.data();
                 batch.set(doc(db, "users", user.uid, "categories", docSnap.id), data);
-                if (!fbCategories.some(c => c.id === docSnap.id)) {
+                if (!finalCategories.some(c => c.id === docSnap.id)) {
                   finalCategories.push(data as Category);
                 }
               });
@@ -283,19 +371,47 @@ export default function App() {
           }
         }
 
+        // Extremely secure: Merge local storage data with Cloud states so local edits are never lost
+        const mergedDiary = [...finalDiary];
+        parsedDiary.forEach(localItem => {
+          if (!mergedDiary.some(cloudItem => cloudItem.id === localItem.id)) {
+            mergedDiary.push(localItem);
+          }
+        });
+
+        const mergedTasks = [...finalTasks];
+        parsedTasks.forEach(localItem => {
+          if (!mergedTasks.some(cloudItem => cloudItem.id === localItem.id)) {
+            mergedTasks.push(localItem);
+          }
+        });
+
+        const mergedEvents = [...finalEvents];
+        parsedEvents.forEach(localItem => {
+          if (!mergedEvents.some(cloudItem => cloudItem.id === localItem.id)) {
+            mergedEvents.push(localItem);
+          }
+        });
+
+        const mergedCategories = [...finalCategories];
+        parsedCategories.forEach(localItem => {
+          if (!mergedCategories.some(cloudItem => cloudItem.id === localItem.id)) {
+            mergedCategories.push(localItem);
+          }
+        });
+
         if (hasCloudDataSet) {
-          console.log("[FIRESTORE] Cloud dataset found. Replacing local states.");
-          // Update local state with Cloud values
-          setDiaryEntries(finalDiary);
-          setWeeklyTasks(finalTasks);
-          setMonthlyEvents(finalEvents);
-          setCategories(finalCategories);
+          console.log("[FIRESTORE] Cloud dataset found. Merging local and cloud states safely.");
+          setDiaryEntries(mergedDiary);
+          setWeeklyTasks(mergedTasks);
+          setMonthlyEvents(mergedEvents);
+          setCategories(mergedCategories);
 
           lastSyncStateRef.current = {
-            diary: finalDiary,
-            tasks: finalTasks,
-            events: finalEvents,
-            categories: finalCategories
+            diary: mergedDiary,
+            tasks: mergedTasks,
+            events: mergedEvents,
+            categories: mergedCategories
           };
 
           if (migrationHappened) {
@@ -306,16 +422,16 @@ export default function App() {
           // Seed local data to Firestore as a batch
           const batch = writeBatch(db);
           
-          parsedDiary.forEach(item => {
+          mergedDiary.forEach(item => {
             batch.set(doc(db, "users", user.uid, "diary_entries", item.id), item);
           });
-          parsedTasks.forEach(item => {
+          mergedTasks.forEach(item => {
             batch.set(doc(db, "users", user.uid, "weekly_tasks", item.id), item);
           });
-          parsedEvents.forEach(item => {
+          mergedEvents.forEach(item => {
             batch.set(doc(db, "users", user.uid, "monthly_events", item.id), item);
           });
-          parsedCategories.forEach(item => {
+          mergedCategories.forEach(item => {
             batch.set(doc(db, "users", user.uid, "categories", item.id), item);
           });
 
@@ -719,22 +835,49 @@ export default function App() {
 
       const hasCloudDataSet = fbDiary.length > 0 || fbTasks.length > 0 || fbEvents.length > 0 || fbCategories.length > 0;
       if (hasCloudDataSet) {
-        setDiaryEntries(fbDiary);
-        setWeeklyTasks(fbTasks);
-        setMonthlyEvents(fbEvents);
-        if (fbCategories.length > 0) {
-          setCategories(fbCategories);
-        }
+        const mergedDiary = [...fbDiary];
+        diaryEntries.forEach(localItem => {
+          if (!mergedDiary.some(cloudItem => cloudItem.id === localItem.id)) {
+            mergedDiary.push(localItem);
+          }
+        });
+
+        const mergedTasks = [...fbTasks];
+        weeklyTasks.forEach(localItem => {
+          if (!mergedTasks.some(cloudItem => cloudItem.id === localItem.id)) {
+            mergedTasks.push(localItem);
+          }
+        });
+
+        const mergedEvents = [...fbEvents];
+        monthlyEvents.forEach(localItem => {
+          if (!mergedEvents.some(cloudItem => cloudItem.id === localItem.id)) {
+            mergedEvents.push(localItem);
+          }
+        });
+
+        const finalCategoriesList = fbCategories.length > 0 ? fbCategories : categories;
+        const mergedCategories = [...finalCategoriesList];
+        categories.forEach(localItem => {
+          if (!mergedCategories.some(cloudItem => cloudItem.id === localItem.id)) {
+            mergedCategories.push(localItem);
+          }
+        });
+
+        setDiaryEntries(mergedDiary);
+        setWeeklyTasks(mergedTasks);
+        setMonthlyEvents(mergedEvents);
+        setCategories(mergedCategories);
 
         lastSyncStateRef.current = {
-          diary: fbDiary,
-          tasks: fbTasks,
-          events: fbEvents,
-          categories: fbCategories.length > 0 ? fbCategories : categories
+          diary: mergedDiary,
+          tasks: mergedTasks,
+          events: mergedEvents,
+          categories: mergedCategories
         };
-        showToast("✅ 클라우드 정밀 동기화가 성료되었습니다.");
+        showToast("✅ 클라우드 정밀 동기화 및 로컬 데이터 세이프 병합이 성료되었습니다.");
       } else {
-        showToast("ℹ️ 클라우드 원격 저장소가 비어 있습니다. 로컬 데이터가 보존됩니다.");
+        showToast("ℹ️ 클라우드 원격 저장소가 비어 있습니다. 로컬 데이터가 안전하게 보존됩니다.");
       }
     } catch (err: any) {
       console.error(err);
