@@ -449,6 +449,109 @@ export default function App() {
 
   }, [diaryEntries, weeklyTasks, monthlyEvents, categories, user]);
 
+  // Dynamically synchronize monthlyEvents to weeklyTasks
+  useEffect(() => {
+    if (monthlyEvents.length === 0) return;
+
+    setWeeklyTasks(prevTasks => {
+      let changed = false;
+      const nextTasks = [...prevTasks];
+
+      monthlyEvents.forEach(evt => {
+        const hasTask = nextTasks.some(t => 
+          t.monthlyEventId === evt.id || 
+          (evt.gcalEventId && t.gcalEventId === evt.gcalEventId)
+        );
+
+        const eventDate = new Date(evt.start);
+        const dayOfWeek = isNaN(eventDate.getTime()) ? 1 : eventDate.getDay();
+        const targetDateStr = evt.start.substring(0, 10);
+        
+        const getTimeString = (isoStr: string, isEnd = false) => {
+          try {
+            const parts = isoStr.split('T');
+            if (parts.length > 1) {
+              return parts[1].substring(0, 5);
+            }
+            return isEnd ? '18:00' : '09:00';
+          } catch {
+            return isEnd ? '18:00' : '09:00';
+          }
+        };
+
+        const expectedTimeStart = getTimeString(evt.start);
+        const expectedTimeEnd = getTimeString(evt.end || evt.start, true);
+        const expectedCompleted = evt.status === 'completed';
+
+        if (!hasTask) {
+          const newTaskId = evt.weeklyTaskId || `week-task-auto-${evt.id}`;
+          nextTasks.push({
+            id: newTaskId,
+            dayOfWeek,
+            title: evt.title,
+            timeStart: expectedTimeStart,
+            timeEnd: expectedTimeEnd,
+            completed: expectedCompleted,
+            syncTarget: !!evt.gcalEventId,
+            gcalEventId: evt.gcalEventId,
+            monthlyEventId: evt.id,
+            date: targetDateStr
+          });
+          changed = true;
+        } else {
+          // Sync existing tasks
+          const taskIndex = nextTasks.findIndex(t => 
+            t.monthlyEventId === evt.id || 
+            (evt.gcalEventId && t.gcalEventId === evt.gcalEventId)
+          );
+          if (taskIndex >= 0) {
+            const t = nextTasks[taskIndex];
+            const hasDiff = 
+              t.title !== evt.title ||
+              t.completed !== expectedCompleted ||
+              t.date !== targetDateStr ||
+              t.dayOfWeek !== dayOfWeek ||
+              t.timeStart !== expectedTimeStart ||
+              t.timeEnd !== expectedTimeEnd ||
+              t.gcalEventId !== evt.gcalEventId;
+
+            if (hasDiff) {
+              nextTasks[taskIndex] = {
+                ...t,
+                title: evt.title,
+                completed: expectedCompleted,
+                date: targetDateStr,
+                dayOfWeek,
+                timeStart: expectedTimeStart,
+                timeEnd: expectedTimeEnd,
+                gcalEventId: evt.gcalEventId,
+                monthlyEventId: evt.id
+              };
+              changed = true;
+            }
+          }
+        }
+      });
+
+      // Cleanup stray local tasks that are linked to non-existent monthly events
+      const currentEventIds = new Set(monthlyEvents.map(e => e.id));
+      const currentGcalIds = new Set(monthlyEvents.filter(e => e.gcalEventId).map(e => e.gcalEventId));
+
+      const filteredTasks = nextTasks.filter(t => {
+        if (t.monthlyEventId) {
+          const exists = currentEventIds.has(t.monthlyEventId) || (t.gcalEventId && currentGcalIds.has(t.gcalEventId));
+          if (!exists) {
+            changed = true;
+            return false;
+          }
+        }
+        return true;
+      });
+
+      return changed ? filteredTasks : prevTasks;
+    });
+  }, [monthlyEvents]);
+
   // Polling logic & Focus event subscription (Spec: 45초 폴링)
   useEffect(() => {
     if (!user) return;

@@ -17,7 +17,7 @@ export default function MonthlyBoardCard({
   onSelectEvent,
   diaryEntries = []
 }: MonthlyBoardCardProps) {
-  const [currentDate, setCurrentDate] = useState(new Date(2026, 4, 1)); // Start at May 2026 based on mock timestamp
+  const [currentDate, setCurrentDate] = useState(() => new Date()); // Start at current date
 
   // Selected date for schedule details / addition modal
   const [selectedDateStr, setSelectedDateStr] = useState<string | null>(null);
@@ -52,7 +52,7 @@ export default function MonthlyBoardCard({
   };
 
   const todayMonth = () => {
-    setCurrentDate(new Date(2026, 4, 29)); // Default to May 29, 2026
+    setCurrentDate(new Date()); // Default to today's date
   };
 
   // Preset time helper for new event inside modal
