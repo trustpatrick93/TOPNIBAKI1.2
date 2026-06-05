@@ -26,6 +26,7 @@ import { DiaryEntry, WeeklyTask, MonthlyEvent, Category, EventStatus } from './t
 import { googleSignIn, logoutUser, initAuth, AppUser, db, developerBypassSignIn } from './auth';
 import { collection, getDocs, setDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { fetchGoogleCalendarEvents, createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from './calendarService';
+import { downloadDiaryEntryAsTxt, uploadDiaryToOneDrive } from './utils/backup';
 
 import ErrorGuideCard from './components/ErrorGuideCard';
 import DailyJournalCard from './components/DailyJournalCard';
@@ -76,6 +77,28 @@ export default function App() {
   const [activeView, setActiveView] = useState<'dashboard' | 'archive'>('dashboard');
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  // Backup configurations (Local & OneDrive)
+  const [localBackupEnabled, setLocalBackupEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('backup_local_enabled') !== 'false';
+  });
+  const [oneDriveEnabled, setOneDriveEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('backup_onedrive_enabled') === 'true';
+  });
+  const [oneDriveFolder, setOneDriveFolder] = useState<string>(() => {
+    return localStorage.getItem('backup_onedrive_folder') || 'Cogwheel_Diary_Backup';
+  });
+  const [oneDriveClientId, setOneDriveClientId] = useState<string>(() => {
+    return localStorage.getItem('backup_onedrive_client_id') || 'a1ebf7c0-2621-4f1b-b463-b6dc29329fc3';
+  });
+  const [oneDriveToken, setOneDriveToken] = useState<string | null>(() => {
+    const savedToken = localStorage.getItem('onedrive_access_token');
+    const savedExpiry = localStorage.getItem('onedrive_token_expiry');
+    if (savedToken && savedExpiry && Number(savedExpiry) > Date.now()) {
+      return savedToken;
+    }
+    return null;
+  });
+
   // Time tracker for visual retro touch
   const [currentTime, setCurrentTime] = useState<string>('');
 
@@ -108,6 +131,38 @@ export default function App() {
       clearInterval(timer);
       unsubscribe();
     };
+  }, []);
+
+  // OneDrive OAuth Callback Fragment Interceptor
+  useEffect(() => {
+    try {
+      if (window.location.hash) {
+        const hash = window.location.hash.substring(1);
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get('access_token');
+        const state = params.get('state');
+        
+        if (accessToken && state === 'onedrive_auth') {
+          const expiryTime = Date.now() + 3600 * 1000;
+          localStorage.setItem('onedrive_access_token', accessToken);
+          localStorage.setItem('onedrive_token_expiry', String(expiryTime));
+          localStorage.setItem('backup_onedrive_enabled', 'true');
+          
+          setOneDriveToken(accessToken);
+          setOneDriveEnabled(true);
+          
+          // Clear hash for cleaner UX
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+          
+          // Show toast after a slight delay so initialization finishes
+          setTimeout(() => {
+            showToast("🟢 마이크로소프트 원드라이브(OneDrive)가 성공적으로 연동되었습니다!");
+          }, 600);
+        }
+      }
+    } catch (e) {
+      console.warn("OneDrive hash error:", e);
+    }
   }, []);
 
   // Sync / Load logic when switching user (Authentication Isolation & Firestore Sync)
@@ -888,19 +943,97 @@ export default function App() {
   };
 
   // Actions handlers
-  const handleAddDiaryEntry = (content: string, category: string) => {
+  const handleAddDiaryEntry = async (content: string, category: string) => {
     const newEntry: DiaryEntry = {
       id: `diary-${Date.now()}`,
       content,
       createdAt: new Date().toISOString(),
       category,
     };
+
+    // 1. Update React state immediately
     setDiaryEntries((prev) => [newEntry, ...prev]);
+
+    if (user) {
+      // 2. Co-write to local storage instantly and synchronously to protect against redirects/timeouts/tabs closing
+      const keyPrefix = `user_${user.uid}_cogwheel`;
+      const currentLocals = localStorage.getItem(`${keyPrefix}_diary_entries`);
+      let parsedLocals: DiaryEntry[] = [];
+      try {
+        parsedLocals = currentLocals ? JSON.parse(currentLocals) : [];
+      } catch (e) {
+        parsedLocals = [];
+      }
+      const updatedLocals = [newEntry, ...parsedLocals];
+      localStorage.setItem(`${keyPrefix}_diary_entries`, JSON.stringify(updatedLocals));
+
+      // 3. Immediately save to Firestore to bypass standard debounced batching delays
+      try {
+        await setDoc(doc(db, "users", user.uid, "diary_entries", newEntry.id), newEntry);
+        console.log("[FIREBASE] Instant direct save succeeded for:", newEntry.id);
+        
+        // Prevent background effect from double-pushing or deleting
+        if (lastSyncStateRef.current) {
+          lastSyncStateRef.current.diary = [newEntry, ...lastSyncStateRef.current.diary.filter(d => d.id !== newEntry.id)];
+        }
+      } catch (firebaseErr) {
+        console.error("[FIREBASE] Instant direct save failed:", firebaseErr);
+      }
+    }
+
+    // 4. Trigger Automatic Backups (Method 1: OneDrive AND Method 2: Local Computer copy)
+    if (localBackupEnabled) {
+      downloadDiaryEntryAsTxt(newEntry);
+    }
+
+    if (oneDriveEnabled && oneDriveToken) {
+      const response = await uploadDiaryToOneDrive(newEntry, oneDriveToken, oneDriveFolder);
+      if (response.success) {
+        showToast("☁️ 마이크로소프트 원드라이브(OneDrive) 백업에 성공했습니다!");
+      } else {
+        console.error("[ONEDRIVE ERROR]", response);
+        // Expiry alert
+        if (response.status === 401) {
+          showToast("⚠️ 원드라이브 로그인 세션이 만료되었습니다. 설정을 통해 다시 로그인해주세요.");
+          localStorage.removeItem('onedrive_access_token');
+          setOneDriveToken(null);
+        } else {
+          showToast("⚠️ 원드라이브 백업 전송 실패. 설정 정보를 확인해주세요.");
+        }
+      }
+    }
+
     showToast("📝 일지가 등록되었습니다.");
   };
 
-  const handleDeleteDiaryEntry = (id: string) => {
+  const handleDeleteDiaryEntry = async (id: string) => {
+    // 1. Instant React state update
     setDiaryEntries((prev) => prev.filter((d) => d.id !== id));
+
+    if (user) {
+      // 2. Synchronous local storage update
+      const keyPrefix = `user_${user.uid}_cogwheel`;
+      const currentLocals = localStorage.getItem(`${keyPrefix}_diary_entries`);
+      let parsedLocals: DiaryEntry[] = [];
+      try {
+        parsedLocals = currentLocals ? JSON.parse(currentLocals) : [];
+      } catch (e) {
+        parsedLocals = [];
+      }
+      const updatedLocals = parsedLocals.filter(d => d.id !== id);
+      localStorage.setItem(`${keyPrefix}_diary_entries`, JSON.stringify(updatedLocals));
+
+      // 3. Instant Firestore deletion
+      try {
+        await deleteDoc(doc(db, "users", user.uid, "diary_entries", id));
+        if (lastSyncStateRef.current) {
+          lastSyncStateRef.current.diary = lastSyncStateRef.current.diary.filter(d => d.id !== id);
+        }
+      } catch (e) {
+        console.error("[FIREBASE] Instant delete error:", e);
+      }
+    }
+
     showToast("🗑️ 일지가 삭제되었습니다.");
   };
 
@@ -916,6 +1049,44 @@ export default function App() {
 
   const handleDeleteCategory = (id: string) => {
     setCategories((prev) => prev.filter((c) => c.id !== id));
+  };
+
+  // Backup handlers
+  const handleToggleLocalBackup = (val: boolean) => {
+    setLocalBackupEnabled(val);
+    localStorage.setItem('backup_local_enabled', String(val));
+    showToast(val ? "💾 일지 등록 즉시 로컬 컴퓨터에 복사본 TXT가 다운로드됩니다." : "🔕 로컬 TXT 자동 저장 기능이 정지되었습니다.");
+  };
+
+  const handleToggleOneDrive = (val: boolean) => {
+    if (val && !oneDriveToken) {
+      showToast("🔑 원드라이브 계정 로그인 후 백업 전송을 활성화할 수 있습니다.");
+      return;
+    }
+    setOneDriveEnabled(val);
+    localStorage.setItem('backup_onedrive_enabled', String(val));
+    showToast(val ? "☁️ 일지 등록 즉시 원드라이브(OneDrive)에 복사본 TXT가 저장됩니다." : "🔕 원드라이브 자동 실시간 전송이 정지되었습니다.");
+  };
+
+  const handleUpdateOneDriveFolder = (folderName: string) => {
+    const clean = folderName.trim() || 'Cogwheel_Diary_Backup';
+    setOneDriveFolder(clean);
+    localStorage.setItem('backup_onedrive_folder', clean);
+  };
+
+  const handleUpdateOneDriveClientId = (clientId: string) => {
+    const clean = clientId.trim() || 'a1ebf7c0-2621-4f1b-b463-b6dc29329fc3';
+    setOneDriveClientId(clean);
+    localStorage.setItem('backup_onedrive_client_id', clean);
+  };
+
+  const handleOneDriveLogout = () => {
+    localStorage.removeItem('onedrive_access_token');
+    localStorage.removeItem('onedrive_token_expiry');
+    localStorage.setItem('backup_onedrive_enabled', 'false');
+    setOneDriveToken(null);
+    setOneDriveEnabled(false);
+    showToast("🔌 원드라이브 연동이 해제되었습니다.");
   };
 
   // Weekly checklist handlers & Propagates up to Google Calendar
@@ -1670,6 +1841,16 @@ export default function App() {
                   onDeleteEntry={handleDeleteDiaryEntry}
                   onAddCategory={handleAddCategory}
                   onDeleteCategory={handleDeleteCategory}
+                  localBackupEnabled={localBackupEnabled}
+                  onToggleLocalBackup={handleToggleLocalBackup}
+                  oneDriveEnabled={oneDriveEnabled}
+                  onToggleOneDrive={handleToggleOneDrive}
+                  oneDriveFolder={oneDriveFolder}
+                  onUpdateOneDriveFolder={handleUpdateOneDriveFolder}
+                  oneDriveClientId={oneDriveClientId}
+                  onUpdateOneDriveClientId={handleUpdateOneDriveClientId}
+                  oneDriveToken={oneDriveToken}
+                  onOneDriveLogout={handleOneDriveLogout}
                 />
 
                 {/* Grid 2: Stretched Weekly repetition list (Sunday ~ Saturday cards) */}
