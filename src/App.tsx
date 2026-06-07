@@ -981,8 +981,23 @@ export default function App() {
     // 1. Update React state immediately
     setDiaryEntries((prev) => [newEntry, ...prev]);
 
+    // 2. Trigger Automatic Local Backups IMMEDIATELY to preserve transient user activation gesture!
+    if (localBackupEnabled) {
+      downloadDiaryEntryAsTxt(newEntry, localBackupFolderHandle).then((res) => {
+        if (res.success) {
+          if (res.method === 'custom_folder') {
+            showToast(`💾 지정된 폴더 [${localBackupFolderName}]에 자필 일지가 직접 저장되었습니다!`);
+          } else {
+            showToast(`⬇️ 일지 자동 백업 완료 (브라우저 다운로드 경로 복사본 소장)`);
+          }
+        } else {
+          showToast(`⚠️ 로컬 자동 백업 실패: ${res.error || '알 수 없는 오류'}`);
+        }
+      });
+    }
+
     if (user) {
-      // 2. Co-write to local storage instantly and synchronously to protect against redirects/timeouts/tabs closing
+      // 3. Co-write to local storage instantly and synchronously to protect against redirects/timeouts/tabs closing
       const keyPrefix = `user_${user.uid}_cogwheel`;
       const currentLocals = localStorage.getItem(`${keyPrefix}_diary_entries`);
       let parsedLocals: DiaryEntry[] = [];
@@ -994,7 +1009,7 @@ export default function App() {
       const updatedLocals = [newEntry, ...parsedLocals];
       localStorage.setItem(`${keyPrefix}_diary_entries`, JSON.stringify(updatedLocals));
 
-      // 3. Immediately save to Firestore to bypass standard debounced batching delays
+      // 4. Immediately save to Firestore to bypass standard debounced batching delays
       try {
         await setDoc(doc(db, "users", user.uid, "diary_entries", newEntry.id), newEntry);
         console.log("[FIREBASE] Instant direct save succeeded for:", newEntry.id);
@@ -1008,15 +1023,6 @@ export default function App() {
       }
     }
 
-    // 4. Trigger Automatic Backups (Method 1: OneDrive AND Method 2: Local Computer copy)
-    if (localBackupEnabled) {
-      downloadDiaryEntryAsTxt(newEntry, localBackupFolderHandle).then((res) => {
-        if (res.success && res.method === 'custom_folder') {
-          showToast(`💾 지정된 폴더 [${localBackupFolderName}]에 자필 일지가 직접 저장되었습니다!`);
-        }
-      });
-    }
-
     if (oneDriveEnabled && oneDriveToken) {
       const response = await uploadDiaryToOneDrive(newEntry, oneDriveToken, oneDriveFolder);
       if (response.success) {
@@ -1028,6 +1034,7 @@ export default function App() {
           showToast("⚠️ 원드라이브 로그인 세션이 만료되었습니다. 설정을 통해 다시 로그인해주세요.");
           localStorage.removeItem('onedrive_access_token');
           setOneDriveToken(null);
+          setOneDriveEnabled(false);
         } else {
           showToast("⚠️ 원드라이브 백업 전송 실패. 설정 정보를 확인해주세요.");
         }
