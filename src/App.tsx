@@ -26,7 +26,13 @@ import { DiaryEntry, WeeklyTask, MonthlyEvent, Category, EventStatus } from './t
 import { googleSignIn, logoutUser, initAuth, AppUser, db, developerBypassSignIn } from './auth';
 import { collection, getDocs, setDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { fetchGoogleCalendarEvents, createGoogleCalendarEvent, updateGoogleCalendarEvent, deleteGoogleCalendarEvent } from './calendarService';
-import { downloadDiaryEntryAsTxt, uploadDiaryToOneDrive } from './utils/backup';
+import { 
+  downloadDiaryEntryAsTxt, 
+  uploadDiaryToOneDrive, 
+  getStoredDirectoryHandle, 
+  setStoredDirectoryHandle, 
+  clearStoredDirectoryHandle 
+} from './utils/backup';
 
 import ErrorGuideCard from './components/ErrorGuideCard';
 import DailyJournalCard from './components/DailyJournalCard';
@@ -81,6 +87,10 @@ export default function App() {
   const [localBackupEnabled, setLocalBackupEnabled] = useState<boolean>(() => {
     return localStorage.getItem('backup_local_enabled') !== 'false';
   });
+  const [localBackupFolderHandle, setLocalBackupFolderHandle] = useState<FileSystemDirectoryHandle | null>(null);
+  const [localBackupFolderName, setLocalBackupFolderName] = useState<string | null>(() => {
+    return localStorage.getItem('backup_local_folder_name');
+  });
   const [oneDriveEnabled, setOneDriveEnabled] = useState<boolean>(() => {
     return localStorage.getItem('backup_onedrive_enabled') === 'true';
   });
@@ -131,6 +141,23 @@ export default function App() {
       clearInterval(timer);
       unsubscribe();
     };
+  }, []);
+
+  // Initialize and load Local Backup Directory Handle from IndexedDB on boot
+  useEffect(() => {
+    const initLocalBackupFolder = async () => {
+      try {
+        const handle = await getStoredDirectoryHandle();
+        if (handle) {
+          setLocalBackupFolderHandle(handle);
+          setLocalBackupFolderName(handle.name);
+          localStorage.setItem('backup_local_folder_name', handle.name);
+        }
+      } catch (e) {
+        console.warn("Failed to load stored directory handle from IndexedDB:", e);
+      }
+    };
+    initLocalBackupFolder();
   }, []);
 
   // OneDrive OAuth Callback Fragment Interceptor
@@ -983,7 +1010,11 @@ export default function App() {
 
     // 4. Trigger Automatic Backups (Method 1: OneDrive AND Method 2: Local Computer copy)
     if (localBackupEnabled) {
-      downloadDiaryEntryAsTxt(newEntry);
+      downloadDiaryEntryAsTxt(newEntry, localBackupFolderHandle).then((res) => {
+        if (res.success && res.method === 'custom_folder') {
+          showToast(`💾 지정된 폴더 [${localBackupFolderName}]에 자필 일지가 직접 저장되었습니다!`);
+        }
+      });
     }
 
     if (oneDriveEnabled && oneDriveToken) {
@@ -1004,6 +1035,77 @@ export default function App() {
     }
 
     showToast("📝 일지가 등록되었습니다.");
+  };
+
+  const handleRestoreDiaryEntries = async (restoredList: { content: string; category: string; createdAt: string }[]) => {
+    if (restoredList.length === 0) return;
+
+    const newEntries: DiaryEntry[] = restoredList.map((item, index) => {
+      const timestamp = new Date(item.createdAt).getTime() + index; // Ensure unique identifier keys
+      return {
+        id: `diary-${timestamp}`,
+        content: item.content,
+        createdAt: item.createdAt,
+        category: item.category,
+      };
+    });
+
+    // 1. Update React state immediately (merge and sort cleanly)
+    setDiaryEntries((prev) => {
+      const merged = [...newEntries, ...prev];
+      return merged.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    });
+
+    if (user) {
+      // 2. Synchronous local storage update
+      const keyPrefix = `user_${user.uid}_cogwheel`;
+      const currentLocals = localStorage.getItem(`${keyPrefix}_diary_entries`);
+      let parsedLocals: DiaryEntry[] = [];
+      try {
+        parsedLocals = currentLocals ? JSON.parse(currentLocals) : [];
+      } catch (e) {
+        parsedLocals = [];
+      }
+      const updatedLocals = [...newEntries, ...parsedLocals].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      localStorage.setItem(`${keyPrefix}_diary_entries`, JSON.stringify(updatedLocals));
+
+      // 3. Immediately save to Firestore (batch-write)
+      try {
+        const batch = writeBatch(db);
+        newEntries.forEach((entry) => {
+          batch.set(doc(db, "users", user.uid, "diary_entries", entry.id), entry);
+        });
+        await batch.commit();
+        console.log(`[FIREBASE RESTORE] Batch save succeeded for ${newEntries.length} entries.`);
+        
+        if (lastSyncStateRef.current) {
+          const mergedArchive = [...newEntries, ...lastSyncStateRef.current.diary].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+          lastSyncStateRef.current.diary = mergedArchive;
+        }
+      } catch (firebaseErr) {
+        console.error("[FIREBASE RESTORE] Batch save failed, using individual fallback:", firebaseErr);
+        for (const entry of newEntries) {
+          try {
+            await setDoc(doc(db, "users", user.uid, "diary_entries", entry.id), entry);
+          } catch (singleErr) {
+            console.error(`[FIREBASE RESTORE] Single save failed for ${entry.id}:`, singleErr);
+          }
+        }
+      }
+    } else {
+      // Offline/Guest mode backup
+      const currentLocals = localStorage.getItem("cogwheel_diary_entries");
+      let parsedLocals: DiaryEntry[] = [];
+      try {
+        parsedLocals = currentLocals ? JSON.parse(currentLocals) : [];
+      } catch (e) {
+        parsedLocals = [];
+      }
+      const updatedLocals = [...newEntries, ...parsedLocals].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      localStorage.setItem("cogwheel_diary_entries", JSON.stringify(updatedLocals));
+    }
+
+    showToast(`📝 총 ${newEntries.length}개의 일지가 성공적으로 아카이브에 복원 업로드되었습니다!`);
   };
 
   const handleDeleteDiaryEntry = async (id: string) => {
@@ -1087,6 +1189,43 @@ export default function App() {
     setOneDriveToken(null);
     setOneDriveEnabled(false);
     showToast("🔌 원드라이브 연동이 해제되었습니다.");
+  };
+
+  const handleSelectLocalBackupFolder = async () => {
+    try {
+      if (!('showDirectoryPicker' in window)) {
+        showToast("⚠️ 네이티브 폴더 직접 저장 기능은 Chrome/Edge 등의 데스크톱 브라우저 환경에서 최적화 지원됩니다. 현 브라우저는 미지원하여 기본 자동 다운로드 창 저장으로 구동됩니다.");
+        return;
+      }
+      const handle = await (window as any).showDirectoryPicker({
+        mode: 'readwrite'
+      });
+      if (handle) {
+        await setStoredDirectoryHandle(handle);
+        setLocalBackupFolderHandle(handle);
+        setLocalBackupFolderName(handle.name);
+        localStorage.setItem('backup_local_folder_name', handle.name);
+        showToast(`📁 내 컴퓨터의 [${handle.name}] 폴더가 백업 저장소로 지정 연동되었습니다!`);
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        return;
+      }
+      console.error("[LOCAL DIRECTORY SELECT ERROR]", err);
+      showToast("❌ 폴더 연동 실패. 브라우저 보안 규정 및 권한 검사로 취소되었습니다.");
+    }
+  };
+
+  const handleClearLocalBackupFolder = async () => {
+    try {
+      await clearStoredDirectoryHandle();
+      setLocalBackupFolderHandle(null);
+      setLocalBackupFolderName(null);
+      localStorage.removeItem('backup_local_folder_name');
+      showToast("🗑️ 폴더 연동이 해제되었습니다. 이제부터 일반 다운로드 창을 통해 저장합니다.");
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   // Weekly checklist handlers & Propagates up to Google Calendar
@@ -1838,11 +1977,15 @@ export default function App() {
                   entries={diaryEntries}
                   categories={categories}
                   onAddEntry={handleAddDiaryEntry}
+                  onRestoreEntries={handleRestoreDiaryEntries}
                   onDeleteEntry={handleDeleteDiaryEntry}
                   onAddCategory={handleAddCategory}
                   onDeleteCategory={handleDeleteCategory}
                   localBackupEnabled={localBackupEnabled}
                   onToggleLocalBackup={handleToggleLocalBackup}
+                  localBackupFolderName={localBackupFolderName}
+                  onSelectLocalBackupFolder={handleSelectLocalBackupFolder}
+                  onClearLocalBackupFolder={handleClearLocalBackupFolder}
                   oneDriveEnabled={oneDriveEnabled}
                   onToggleOneDrive={handleToggleOneDrive}
                   oneDriveFolder={oneDriveFolder}

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { BookOpen, FolderPlus, Tag, Trash2, Calendar, Plus, CornerDownRight, Check, Hash, Sparkles, BrainCircuit, X, Lightbulb, ShieldCheck, HardDrive, Cloud, ExternalLink, Lock } from 'lucide-react';
+import { BookOpen, FolderPlus, Tag, Trash2, Calendar, Plus, CornerDownRight, Check, Hash, Sparkles, BrainCircuit, X, Lightbulb, ShieldCheck, HardDrive, Cloud, ExternalLink, Lock, Upload, FileText, RefreshCw, AlertCircle } from 'lucide-react';
 import { DiaryEntry, Category } from '../types';
 
 interface DailyJournalCardProps {
   entries: DiaryEntry[];
   categories: Category[];
   onAddEntry: (content: string, category: string) => void;
+  onRestoreEntries?: (restoredList: { content: string; category: string; createdAt: string }[]) => void;
   onDeleteEntry: (id: string) => void;
   onAddCategory: (name: string, color: string) => void;
   onDeleteCategory: (id: string) => void;
@@ -14,6 +15,9 @@ interface DailyJournalCardProps {
   // Backup configurations passed from core App container
   localBackupEnabled: boolean;
   onToggleLocalBackup: (val: boolean) => void;
+  localBackupFolderName: string | null;
+  onSelectLocalBackupFolder: () => void;
+  onClearLocalBackupFolder: () => void;
   oneDriveEnabled: boolean;
   onToggleOneDrive: (val: boolean) => void;
   oneDriveFolder: string;
@@ -38,11 +42,15 @@ export default function DailyJournalCard({
   entries,
   categories,
   onAddEntry,
+  onRestoreEntries,
   onDeleteEntry,
   onAddCategory,
   onDeleteCategory,
   localBackupEnabled,
   onToggleLocalBackup,
+  localBackupFolderName,
+  onSelectLocalBackupFolder,
+  onClearLocalBackupFolder,
   oneDriveEnabled,
   onToggleOneDrive,
   oneDriveFolder,
@@ -54,6 +62,137 @@ export default function DailyJournalCard({
 }: DailyJournalCardProps) {
   const [content, setContent] = useState('');
   const [selectedCategory, setSelectedCategory] = useState(categories[0]?.name || '⚙️ 일상');
+
+  // Multi-file TXT restoration states
+  const [restoringFiles, setRestoringFiles] = useState<{
+    id: string;
+    filename: string;
+    content: string;
+    createdAt: string;
+    category: string;
+    parsedDateStr: string;
+    isFilenameMatched: boolean;
+  }[]>([]);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
+
+  const handleTxtFilesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsProcessingFiles(true);
+    const loadedList: typeof restoringFiles = [];
+    let processedCount = 0;
+
+    const fileArray = (Array.from(files) as File[]).filter((f: File) => f.name.endsWith('.txt'));
+    if (fileArray.length === 0) {
+      setIsProcessingFiles(false);
+      return;
+    }
+
+    fileArray.forEach((file: File, index: number) => {
+      const reader = new FileReader();
+      const filename = file.name;
+      
+      // Parse timestamp from filename: 톱니바퀴_일지_YYYY-MM-DD_HHMMSS.txt
+      const match = filename.match(/톱니바퀴_일지_([0-9]{4}-[0-9]{2}-[0-9]{2})_([0-9]{2})([0-9]{2})([0-9]{2})/);
+      let createdAtStr = '';
+      let isFilenameMatched = false;
+      
+      if (match) {
+        const datePart = match[1]; // "YYYY-MM-DD"
+        const h = match[2];
+        const m = match[3];
+        const s = match[4];
+        const dObj = new Date(`${datePart}T${h}:${m}:${s}`);
+        if (!isNaN(dObj.getTime())) {
+          createdAtStr = dObj.toISOString();
+          isFilenameMatched = true;
+        }
+      }
+
+      if (!createdAtStr) {
+        if (file.lastModified) {
+          createdAtStr = new Date(file.lastModified).toISOString();
+        } else {
+          createdAtStr = new Date().toISOString();
+        }
+      }
+
+      reader.onload = (event) => {
+        try {
+          const rawText = event.target?.result as string;
+          if (rawText) {
+            // Intelligently strip old formatting wrapper templates if they are present
+            let cleanContent = rawText;
+            if (rawText.includes('[일지 본문 내용]')) {
+              const parts = rawText.split('-------------------------------------------------------');
+              if (parts.length >= 3) {
+                cleanContent = parts[2].trim();
+              }
+            }
+
+            loadedList.push({
+              id: `restore-${index}-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              filename,
+              content: cleanContent,
+              createdAt: createdAtStr,
+              category: categories[0]?.name || '⚙️ 일상',
+              parsedDateStr: new Date(createdAtStr).toLocaleString('ko-KR', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+              }),
+              isFilenameMatched
+            });
+          }
+        } catch (err) {
+          console.error("FileReader parsing error:", err);
+        }
+
+        processedCount++;
+        if (processedCount === fileArray.length) {
+          setRestoringFiles(prev => [...prev, ...loadedList]);
+          setIsProcessingFiles(false);
+          // Reset file input target value so the same files can be re-uploaded if cleared
+          e.target.value = '';
+        }
+      };
+
+      reader.onerror = () => {
+        processedCount++;
+        if (processedCount === fileArray.length) {
+          setIsProcessingFiles(false);
+        }
+      };
+
+      reader.readAsText(file, 'utf-8');
+    });
+  };
+
+  const handleUpdateRestoreCategory = (id: string, catName: string) => {
+    setRestoringFiles(prev => prev.map(f => f.id === id ? { ...f, category: catName } : f));
+  };
+
+  const handleRemoveRestoreFile = (id: string) => {
+    setRestoringFiles(prev => prev.filter(f => f.id !== id));
+  };
+
+  const handleExecuteRestore = () => {
+    if (restoringFiles.length === 0) return;
+    if (onRestoreEntries) {
+      onRestoreEntries(
+        restoringFiles.map(r => ({
+          content: r.content,
+          category: r.category,
+          createdAt: r.createdAt
+        }))
+      );
+      setRestoringFiles([]);
+    }
+  };
 
   useEffect(() => {
     if (categories.length > 0 && !categories.some(c => c.name === selectedCategory)) {
@@ -306,27 +445,69 @@ export default function DailyJournalCard({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-emerald-200/45">
               
               {/* Method 2: Local Copy Saving */}
-              <div className="bg-white border border-emerald-100 p-3.5 rounded-lg space-y-2.5 shadow-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-mono font-black text-stone-850 flex items-center gap-1.5">
-                    <HardDrive className="w-4 h-4 text-[#15803d]" /> 방법 2: 내 컴퓨터 자동 TXT 저장
-                  </span>
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={localBackupEnabled} 
-                      onChange={(e) => onToggleLocalBackup(e.target.checked)}
-                      className="sr-only peer" 
-                    />
-                    <div className="w-9 h-5 bg-stone-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#15803d]"></div>
-                  </label>
+              <div className="bg-white border border-emerald-100 p-3.5 rounded-lg space-y-2.5 shadow-xs flex flex-col justify-between">
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono font-black text-stone-850 flex items-center gap-1.5">
+                      <HardDrive className="w-4 h-4 text-[#15803d]" /> 방법 2: 내 컴퓨터 자동 TXT 저장
+                    </span>
+                    <label className="relative inline-flex inline-flex items-center cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={localBackupEnabled} 
+                        onChange={(e) => onToggleLocalBackup(e.target.checked)}
+                        className="sr-only peer" 
+                      />
+                      <div className="w-9 h-5 bg-stone-200 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#15803d]"></div>
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-stone-500 leading-relaxed">
+                    새 일지를 작성할 때마다 자필 일지 기록 내용(자연어)만을 고스란히 담아 <strong>텍스트 파일(.txt)로 지정 경로에 자동 저장</strong>합니다.
+                  </p>
+                  
+                  {/* Folder Picker Component */}
+                  <div className="bg-emerald-50/50 p-2.5 rounded border border-emerald-150 space-y-1.5">
+                    <span className="text-[10px] font-mono font-black text-emerald-950 block">📂 백업 저장 폴더 지정</span>
+                    {localBackupFolderName ? (
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="text-[10px] font-mono text-emerald-900 font-bold max-w-[150px] truncate" title={localBackupFolderName}>
+                          📁 {localBackupFolderName}
+                        </span>
+                        <div className="flex gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={onSelectLocalBackupFolder}
+                            className="text-[9px] font-mono bg-white hover:bg-[#edeae4] text-stone-700 border border-stone-300 py-0.5 px-1.5 rounded transition-colors cursor-pointer"
+                          >
+                            변경
+                          </button>
+                          <button
+                            type="button"
+                            onClick={onClearLocalBackupFolder}
+                            className="text-[9px] font-mono bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 py-0.5 px-1.5 rounded transition-colors cursor-pointer"
+                          >
+                            해제
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[9px] font-mono text-stone-400">지정된 폴더 없음 (기본 다운로드 경로 적용)</span>
+                        <button
+                          type="button"
+                          onClick={onSelectLocalBackupFolder}
+                          className="text-[9px] font-mono bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-0.5 px-2 rounded cursor-pointer transition-colors shadow-xs shrink-0"
+                        >
+                          폴더 지정
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <p className="text-[10px] text-stone-500 leading-relaxed">
-                  새 일지를 작성할 때마다 브라우저가 소장용 텍스트 파일(.txt)로 즉각 변환하여 컴퓨터에 <strong>즉시 자동 다운로드</strong>합니다.
-                </p>
-                <div className="bg-stone-50 p-2 rounded border border-stone-100 font-mono text-[9px] text-[#2c3e2f] leading-normal">
-                  파일명 양식 예시:<br />
-                  <span className="font-semibold text-emerald-700">톱니바퀴_일지_YYYY-MM-DD_HHMMSS.txt</span>
+
+                <div className="bg-stone-50 p-2 rounded border border-stone-100 font-mono text-[9px] text-[#2c3e2f] leading-normal pt-2 border-t border-stone-100">
+                  기록 보존 상태: <strong className="text-emerald-700 font-bold">인코딩 순수 본문 100% 자연어 보존</strong><br />
+                  <span className="text-[8px] text-stone-400">인공 시스템 메타데이터를 전부 배제한 순수 문장 텍스트 파일로 저장됩니다.</span>
                 </div>
               </div>
 
@@ -385,6 +566,126 @@ export default function DailyJournalCard({
                 </div>
               </div>
 
+            </div>
+
+            {/* 복원 기능 섹션 (TXT 파일 업로드 및 일괄 복구) */}
+            <div className="bg-white border border-[#b4cca0] rounded-lg p-3.5 space-y-3.5 shadow-xs">
+              <div>
+                <h5 className="text-xs font-mono font-black text-stone-850 flex items-center gap-1.5 select-none">
+                  <Upload className="w-4 h-4 text-emerald-700 shrink-0" /> 소장용 백업 TXT 파일 일괄 복원 및 아카이브 업로드 (Recovery Hub)
+                </h5>
+                <p className="text-[10px] text-stone-500 mt-1 leading-relaxed font-sans">
+                  과거에 컴퓨터나 OneDrive 등에 저장해 두었던 톱니바퀴 일지 TXT 파일들을 일괄 선택하여 업로드하면, 원문 그대로 완벽하게 아카이브에 다시 일지로 재등록시킬 수 있습니다.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-2.5">
+                {/* Drag zone input */}
+                <label className="border-2 border-dashed border-emerald-200 hover:border-emerald-500 bg-emerald-50/10 hover:bg-emerald-50/30 p-5 rounded-lg flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors relative">
+                  <input
+                    type="file"
+                    multiple
+                    accept=".txt"
+                    onChange={handleTxtFilesUpload}
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                  />
+                  <div className="p-2 bg-white rounded-full shadow-sm border border-emerald-100">
+                    <Upload className="w-5 h-5 text-emerald-850" />
+                  </div>
+                  <div className="text-center select-none">
+                    <span className="text-[10px] font-bold text-stone-700 block">백업 텍스트 파일 다중 선택 (.txt)</span>
+                    <span className="text-[9px] text-stone-400 block mt-0.5">여기를 클릭하거나 파일을 이 안에 끌어다 놓아주세요.</span>
+                  </div>
+                </label>
+
+                {/* Upload Status */}
+                {isProcessingFiles && (
+                  <div className="flex items-center justify-center gap-2 py-3 bg-stone-50 rounded border border-stone-100">
+                    <RefreshCw className="w-3.5 h-3.5 text-emerald-700 animate-spin" />
+                    <span className="text-[10px] font-mono text-stone-600 font-semibold animate-pulse">업로드 파일을 분석 및 구조 해석하는 중입니다...</span>
+                  </div>
+                )}
+
+                {/* Upload Preview Table */}
+                {restoringFiles.length > 0 && (
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-mono font-black text-stone-700 flex items-center gap-1">
+                        <AlertCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> 아카이브 복원 대기 목록 ({restoringFiles.length}개 발견)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setRestoringFiles([])}
+                        className="text-[9px] font-mono hover:underline text-rose-600 font-bold"
+                      >
+                        선택 전체 초기화
+                      </button>
+                    </div>
+
+                    <div className="max-h-60 overflow-y-auto border border-stone-200 rounded-md divide-y divide-stone-100 bg-stone-50/30">
+                      {restoringFiles.map((file) => (
+                        <div key={file.id} className="p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs bg-white">
+                          <div className="space-y-1 sm:max-w-[70%]">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <FileText className="w-3.5 h-3.5 text-stone-500 shrink-0" />
+                              <span className="font-semibold text-stone-800 break-all text-[10px]">{file.filename}</span>
+                              {file.isFilenameMatched ? (
+                                <span className="text-[8px] bg-emerald-100 text-emerald-800 px-1 py-0.2 rounded font-mono font-bold select-none">자필 자동 파일명 날짜 파싱</span>
+                              ) : (
+                                <span className="text-[8px] bg-amber-100 text-amber-800 px-1 py-0.2 rounded font-mono font-bold select-none">일반 메타 수정날짜 파싱</span>
+                              )}
+                            </div>
+                            <div className="text-[9px] font-mono text-stone-500">
+                              🕒 감지된 작성 시각: <strong className="text-emerald-700 font-bold">{file.parsedDateStr}</strong>
+                            </div>
+                            {file.content && (
+                              <div className="text-[9px] text-stone-500 bg-stone-50/50 p-1.5 rounded border border-stone-100 line-clamp-2 leading-relaxed" title={file.content}>
+                                본문 요약: &quot;{file.content}&quot;
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2.5 self-end sm:self-auto shrink-0 border-t sm:border-0 pt-2 sm:pt-0">
+                            {/* Category picker dropdown */}
+                            <div className="flex flex-col gap-0.5">
+                              <span className="text-[8px] font-mono text-stone-400">카테고리 지정</span>
+                              <select
+                                value={file.category}
+                                onChange={(e) => handleUpdateRestoreCategory(file.id, e.target.value)}
+                                className="bg-stone-50 border border-stone-300 rounded px-1.5 py-0.5 text-[10px] font-mono focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              >
+                                {categories.map((cat) => (
+                                  <option key={cat.id} value={cat.name}>{cat.name}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            {/* Remove button */}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveRestoreFile(file.id)}
+                              className="p-1 hover:bg-rose-50 text-stone-400 hover:text-rose-600 rounded transition-colors self-end sm:self-auto flex items-center justify-center"
+                              title="목록에서 제거"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex justify-end gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleExecuteRestore}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-[11px] font-bold py-1.5 px-4 rounded shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin-hover" /> 총 {restoringFiles.length}개의 일지 아카이브 복원 업로드 실행
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Config details */}
